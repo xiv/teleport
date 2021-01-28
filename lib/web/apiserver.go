@@ -234,7 +234,6 @@ func NewHandler(cfg Config, opts ...HandlerOption) (*RewritingHandler, error) {
 	h.POST("/webapi/sessions/app", h.WithAuth(h.createAppSession))
 	h.DELETE("/webapi/sessions", h.WithAuth(h.deleteSession))
 	h.POST("/webapi/sessions/renew", h.WithAuth(h.renewSession))
-	h.POST("/webapi/sessions/renew/:requestId", h.WithAuth(h.renewSession))
 
 	h.GET("/webapi/users/password/token/:token", httplib.MakeHandler(h.getResetPasswordTokenHandle))
 	h.PUT("/webapi/users/password/token", httplib.WithCSRFProtection(h.changePasswordWithToken))
@@ -355,7 +354,6 @@ func NewHandler(cfg Config, opts ...HandlerOption) (*RewritingHandler, error) {
 			return
 		}
 
-		// serve Web UI:
 		if strings.HasPrefix(r.URL.Path, "/web/app") {
 			httplib.SetStaticFileHeaders(w.Header())
 			http.StripPrefix("/web", http.FileServer(staticFS)).ServeHTTP(w, r)
@@ -1172,6 +1170,14 @@ type CreateSessionResponse struct {
 	Token string `json:"token"`
 	// ExpiresIn sets seconds before this token is not valid
 	ExpiresIn int `json:"expires_in"`
+	// Session contains web session expiry and roles assumed.
+	Session webSession `json:"session"`
+}
+type webSession struct {
+	// Expires is the absolute time that this session expires.
+	Expires time.Time `json:"expires"`
+	// Roles is the roles assigned to this session.
+	Roles []string `json:"roles"`
 }
 
 func NewSessionResponse(ctx *SessionContext) (*CreateSessionResponse, error) {
@@ -1179,28 +1185,37 @@ func NewSessionResponse(ctx *SessionContext) (*CreateSessionResponse, error) {
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	webSession := ctx.GetWebSession()
-	user, err := clt.GetUser(webSession.GetUser(), false)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
+
+	session := ctx.GetWebSession()
+	// user, err := clt.GetUser(session.GetUser(), false)
+	// if err != nil {
+	// 	return nil, trace.Wrap(err)
+	// }
 	var roles services.RoleSet
-	for _, roleName := range user.GetRoles() {
+	for _, roleName := range session.GetRoles() {
 		role, err := clt.GetRole(roleName)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
 		roles = append(roles, role)
 	}
+
+	// What does 0 mean here?
+	// Do i need to also include access request roles here?
 	_, err = roles.CheckLoginDuration(0)
+
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
 	return &CreateSessionResponse{
 		Type:      roundtrip.AuthBearer,
-		Token:     webSession.GetBearerToken(),
-		ExpiresIn: int(webSession.GetBearerTokenExpiryTime().Sub(ctx.parent.clock.Now()) / time.Second),
+		Token:     session.GetBearerToken(),
+		ExpiresIn: int(session.GetBearerTokenExpiryTime().Sub(ctx.parent.clock.Now()) / time.Second),
+		Session: webSession{
+			Expires: session.GetExpiryTime(),
+			Roles:   session.GetRoles(),
+		},
 	}, nil
 }
 
@@ -1289,9 +1304,18 @@ func (h *Handler) logout(w http.ResponseWriter, ctx *SessionContext) error {
 // 	It issues the new session and generates new session cookie.
 // 	It's important to understand that the old session becomes effectively invalid.
 func (h *Handler) renewSession(w http.ResponseWriter, r *http.Request, params httprouter.Params, ctx *SessionContext) (interface{}, error) {
-	requestID := params.ByName("requestId")
+	req := &auth.WebSessionParams{}
 
-	newSess, err := ctx.ExtendWebSession(requestID)
+	if r.Body != http.NoBody {
+		if err := httplib.ReadJSON(r, &req); err != nil {
+			return nil, trace.Wrap(err)
+		}
+	}
+
+	fmt.Println("----- renewSession req: ", req)
+	fmt.Println("----- renewSession prev session id: ", ctx.sess.GetName())
+
+	newSess, err := ctx.ExtendWebSession(*req)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -1305,6 +1329,8 @@ func (h *Handler) renewSession(w http.ResponseWriter, r *http.Request, params ht
 	if err := SetSession(w, newSess.GetUser(), newSess.GetName()); err != nil {
 		return nil, trace.Wrap(err)
 	}
+	fmt.Println("----- renewSession new session id: ", newSess.GetName())
+
 	return NewSessionResponse(newContext)
 }
 

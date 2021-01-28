@@ -61,6 +61,10 @@ type WebSession interface {
 	GetBearerTokenExpiryTime() time.Time
 	// GetExpiryTime - absolute time when web session expires
 	GetExpiryTime() time.Time
+	// Get
+	SetRoles([]string)
+	// Get
+	GetRoles() []string
 	// WithoutSecrets returns copy of the web session but without private keys
 	WithoutSecrets() WebSession
 	// CheckAndSetDefaults checks and set default values for any missing fields.
@@ -83,6 +87,14 @@ func NewWebSession(name string, kind string, subkind string, spec WebSessionSpec
 		},
 		Spec: spec,
 	}
+}
+
+func (ws *WebSessionV2) GetRoles() []string {
+	return ws.Spec.Roles
+}
+
+func (ws *WebSessionV2) SetRoles(roles []string) {
+	ws.Spec.Roles = roles
 }
 
 // GetKind gets resource Kind
@@ -296,6 +308,10 @@ const WebSessionSpecV2Schema = `{
     "tls_cert": {"type": "string"},
     "bearer_token": {"type": "string"},
     "bearer_token_expires": {"type": "string"},
+    "roles": {
+		  "type": "array",
+		  "items": { "type": "string" }
+		},
     "expires": {"type": "string"}%v
   }
 }`

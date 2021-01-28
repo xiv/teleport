@@ -1368,6 +1368,8 @@ message WebSessionSpecV2 {
         (gogoproto.nullable) = false,
         (gogoproto.jsontag) = "expires"
     ];
+    // Roles are the roles assumed by the user of this web session.
+    repeated string Roles = 8 [ (gogoproto.jsontag) = "roles" ];
 }
 
 // RemoteClusterV3 represents remote cluster resource specification

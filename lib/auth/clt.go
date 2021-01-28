@@ -1090,15 +1090,21 @@ func (c *Client) GetU2FSignRequest(user string, password []byte) (*u2f.SignReque
 	return signRequest, nil
 }
 
+// TODO lisa
+type WebSessionParams struct {
+	PrevSessionID   string    `json:"prev_session_id"`
+	AccessRequestID string    `json:"requestId"`
+	User            string    `json:"user"`
+	Expires         time.Time `json:"expires"`
+	Roles           []string  `json:"roles"`
+}
+
 // ExtendWebSession creates a new web session for a user based on another
 // valid web session
-func (c *Client) ExtendWebSession(user string, prevSessionID string, accessRequestID string) (services.WebSession, error) {
+func (c *Client) ExtendWebSession(params WebSessionParams) (services.WebSession, error) {
 	out, err := c.PostJSON(
-		c.Endpoint("users", user, "web", "sessions"),
-		createWebSessionReq{
-			PrevSessionID:   prevSessionID,
-			AccessRequestID: accessRequestID,
-		},
+		c.Endpoint("users", params.User, "web", "sessions"),
+		params,
 	)
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -1110,7 +1116,7 @@ func (c *Client) ExtendWebSession(user string, prevSessionID string, accessReque
 func (c *Client) CreateWebSession(user string) (services.WebSession, error) {
 	out, err := c.PostJSON(
 		c.Endpoint("users", user, "web", "sessions"),
-		createWebSessionReq{},
+		WebSessionParams{},
 	)
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -2126,7 +2132,7 @@ type WebService interface {
 	GetWebSessionInfo(user string, sid string) (services.WebSession, error)
 	// ExtendWebSession creates a new web session for a user based on another
 	// valid web session
-	ExtendWebSession(user string, prevSessionID string, accessRequestID string) (services.WebSession, error)
+	ExtendWebSession(params WebSessionParams) (services.WebSession, error)
 	// CreateWebSession creates a new web session for a user
 	CreateWebSession(user string) (services.WebSession, error)
 	// DeleteWebSession deletes a web session for this user by id

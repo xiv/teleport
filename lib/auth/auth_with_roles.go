@@ -792,11 +792,12 @@ func (a *ServerWithRoles) CreateWebSession(user string) (services.WebSession, er
 	return a.authServer.CreateWebSession(user)
 }
 
-func (a *ServerWithRoles) ExtendWebSession(user, prevSessionID, accessRequestID string) (services.WebSession, error) {
-	if err := a.currentUserAction(user); err != nil {
+// TODO lisa
+func (a *ServerWithRoles) ExtendWebSession(params WebSessionParams) (services.WebSession, error) {
+	if err := a.currentUserAction(params.User); err != nil {
 		return nil, trace.Wrap(err)
 	}
-	return a.authServer.ExtendWebSession(user, prevSessionID, accessRequestID, a.context.Identity.GetIdentity())
+	return a.authServer.ExtendWebSession(params, a.context.Identity.GetIdentity())
 }
 
 func (a *ServerWithRoles) GetWebSessionInfo(user string, sid string) (services.WebSession, error) {

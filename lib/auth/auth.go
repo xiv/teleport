@@ -884,8 +884,8 @@ func (a *Server) CheckU2FSignResponse(user string, response *u2f.SignResponse) e
 
 // ExtendWebSession creates a new web session for a user based on a valid previous sessionID.
 // Additional roles are appended to initial roles if there is an approved access request.
-func (a *Server) ExtendWebSession(user, prevSessionID, accessRequestID string, identity tlsca.Identity) (services.WebSession, error) {
-	prevSession, err := a.GetWebSession(user, prevSessionID)
+func (a *Server) ExtendWebSession(params WebSessionParams, identity tlsca.Identity) (services.WebSession, error) {
+	prevSession, err := a.GetWebSession(params.User, params.PrevSessionID)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -903,8 +903,8 @@ func (a *Server) ExtendWebSession(user, prevSessionID, accessRequestID string, i
 		return nil, trace.Wrap(err)
 	}
 
-	if accessRequestID != "" {
-		newRoles, requestExpiry, err := a.getRolesAndExpiryFromAccessRequest(user, accessRequestID)
+	if params.AccessRequestID != "" {
+		newRoles, requestExpiry, err := a.getRolesAndExpiryFromAccessRequest(params.User, params.AccessRequestID)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -918,7 +918,16 @@ func (a *Server) ExtendWebSession(user, prevSessionID, accessRequestID string, i
 		}
 	}
 
-	sess, err := a.NewWebSession(user, roles, traits)
+	if !params.Expires.IsZero() && len(params.Roles) > 0 {
+		if err := utils.StringSliceSubset(roles, params.Roles); err != nil {
+			return nil, trace.Wrap(err)
+		}
+
+		roles = params.Roles
+		expiresAt = params.Expires
+	}
+
+	sess, err := a.NewWebSession(params.User, roles, traits)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -926,7 +935,7 @@ func (a *Server) ExtendWebSession(user, prevSessionID, accessRequestID string, i
 	sess.SetExpiryTime(expiresAt)
 	bearerTokenTTL := utils.MinTTL(utils.ToTTL(a.clock, expiresAt), BearerTokenTTL)
 	sess.SetBearerTokenExpiryTime(a.clock.Now().UTC().Add(bearerTokenTTL))
-	if err := a.UpsertWebSession(user, sess); err != nil {
+	if err := a.UpsertWebSession(params.User, sess); err != nil {
 		return nil, trace.Wrap(err)
 	}
 
@@ -1535,6 +1544,7 @@ func (a *Server) NewWebSession(username string, roles []string, traits wrappers.
 		Expires:            a.clock.Now().UTC().Add(sessionTTL),
 		BearerToken:        bearerToken,
 		BearerTokenExpires: a.clock.Now().UTC().Add(bearerTokenTTL),
+		Roles:              roles,
 	}), nil
 }
 
