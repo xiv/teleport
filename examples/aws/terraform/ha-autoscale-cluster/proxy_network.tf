@@ -116,12 +116,12 @@ resource "aws_security_group_rule" "proxy_egress_allow_all_traffic_acm" {
 
 // Network load balancer for proxy server
 resource "aws_lb" "proxy" {
-  name                              = "${var.cluster_name}-proxy"
-  internal                          = false
-  subnets                           = aws_subnet.public.*.id
-  load_balancer_type                = "network"
-  idle_timeout                      = 3600
-  enable_cross_zone_load_balancing  = true
+  name                             = "${var.cluster_name}-proxy"
+  internal                         = false
+  subnets                          = aws_subnet.public.*.id
+  load_balancer_type               = "network"
+  idle_timeout                     = 3600
+  enable_cross_zone_load_balancing = true
 
   tags = {
     TeleportCluster = var.cluster_name
@@ -246,7 +246,7 @@ resource "aws_lb_listener" "proxy_web_acm" {
   load_balancer_arn = aws_lb.proxy_acm[0].arn
   port              = "443"
   protocol          = "HTTPS"
-  certificate_arn   = aws_acm_certificate_validation.cert[0].certificate_arn
+  certificate_arn   = aws_acm_certificate_validation.cert.certificate_arn
   count             = var.use_acm ? 1 : 0
 
   default_action {
@@ -291,7 +291,7 @@ resource "aws_lb_listener" "proxy_grafana_acm" {
   load_balancer_arn = aws_lb.proxy_acm[0].arn
   port              = "8443"
   protocol          = "HTTPS"
-  certificate_arn   = aws_acm_certificate_validation.cert[0].certificate_arn
+  certificate_arn   = aws_acm_certificate_validation.cert.certificate_arn
   count             = var.use_acm ? 1 : 0
 
   default_action {
@@ -299,4 +299,3 @@ resource "aws_lb_listener" "proxy_grafana_acm" {
     type             = "forward"
   }
 }
-
