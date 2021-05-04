@@ -17,9 +17,11 @@ limitations under the License.
 package client
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"io/ioutil"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -81,10 +83,19 @@ func Ping(ctx context.Context, proxyAddr string, insecure bool, pool *x509.CertP
 	}
 
 	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+               return nil, trace.Wrap(err)
+       }
+	fmt.Printf("--> Requested proxy address %s.\n", proxyAddr)
+  fmt.Printf("--> Ping response: %v.\n", string(body))
+
+
 	pr := &PingResponse{}
-	if err := json.NewDecoder(resp.Body).Decode(pr); err != nil {
-		return nil, trace.Wrap(err)
-	}
+
+       if err := json.NewDecoder(bytes.NewReader(body)).Decode(pr); err != nil {
+                return nil, trace.Wrap(err)
+  }
 
 	return pr, nil
 }
