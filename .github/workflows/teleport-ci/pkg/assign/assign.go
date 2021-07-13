@@ -59,7 +59,6 @@ func (e *Assign) Assign() error {
 		return trace.Wrap(err)
 	}
 	client := e.Environment.Client
-
 	// Assigning reviewers to pull request
 	pr, _, err := client.PullRequests.RequestReviewers(context.TODO(),
 		e.pullContext.repoOwner,

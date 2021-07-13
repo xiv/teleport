@@ -1,7 +1,6 @@
 package main
 
 import (
-	//"context"
 	"context"
 	"log"
 	"os"
@@ -17,12 +16,12 @@ import (
 func main() {
 	args := os.Args[1:]
 	if len(args) != 1 {
-		panic("one argument needed \nassign-reviewers or check-reviewers")
+		panic("One argument needed \nassign-reviewers or check-reviewers")
 	}
 
 	accessToken := os.Getenv(ci.TOKEN)
 	if accessToken == "" {
-		log.Fatal("token is not set as an environment variable")
+		log.Fatal("Token is not set as an environment variable.")
 	}
 
 	// Creating and authenticating the Github client
@@ -76,7 +75,7 @@ func main() {
 			log.Fatal(err)
 		}
 	default:
-		log.Fatal("unknown subcommand")
+		log.Fatalf("Unknown subcommand: %v", args[0])
 	}
 
 }

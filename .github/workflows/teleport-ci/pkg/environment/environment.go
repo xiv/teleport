@@ -73,7 +73,6 @@ func unmarshalReviewers(str string) (map[string][]string, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	return m, nil
 }
 

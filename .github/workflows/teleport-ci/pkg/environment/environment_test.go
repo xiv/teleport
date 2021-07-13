@@ -8,7 +8,6 @@ import (
 )
 
 func TestNewEnvironment(t *testing.T) {
-
 	tests := []struct {
 		cfg      Config
 		checkErr require.ErrorAssertionFunc
