@@ -68,7 +68,7 @@ func (e *Assign) Assign() error {
 		return trace.Wrap(err)
 	}
 
-	var reqs map[string]bool
+	reqs := make(map[string]bool)
 	for _, reviewer := range pr.RequestedReviewers {
 		reqs[*reviewer.Login] = true
 	}
