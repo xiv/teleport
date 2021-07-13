@@ -1,0 +1,22 @@
+# Workflow will trigger on all pull request review event types. 
+on: pull_request_review
+
+jobs: 
+  check-reviews:
+    name: Checking reviewers 
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout master branch of Teleport repository. This is to prevent an
+      # attacker from submitting their own review assignment logic. 
+      - name: Checkout master branch 
+        uses: actions/checkout@v2
+        with:
+          ref: master 
+      - name: Installing the latest version of Go.
+        uses: actions/setup-go@v2
+        # Run "check-reviewers" subcommand on bot.
+      - name: Assigning reviewers 
+        run: cd teleport-ci && make check
+        env: 
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REVIEWERS: ${{ secrets.ASSIGNMENTS }}

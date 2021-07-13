@@ -1,0 +1,35 @@
+# This workflow is run whenever a Pull Request is opened, re-opened, or taken
+# out of draft (ready for review).
+#
+# NOTE: Due to the sensitive nature of this workflow, it must always be run
+# against master AND with minimal permissions. These properties must always
+# be maintained!
+#
+# While it's tempting to use "pull_request_target" which automatically runs
+# on the base of the PR, that target also grants the GITHUB_TOKEN write access
+# to the repository.
+on: pull_request
+ 
+jobs:
+  auto-request-review:
+    name: Auto Request Review
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout master branch of Teleport repository. This is to prevent an
+      # attacker from submitting their own review assignment logic.
+      - name: Checkout master branch
+        uses: actions/checkout@v2
+        with:
+          ref: master
+      - name: Installing the latest version of Go.
+        uses: actions/setup-go@v2
+      # Run "assign-reviewers" subcommand on bot.
+      - name: Assigning reviewers 
+        run: cd teleport-ci && make assign
+        env: 
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REVIEWERS: ${{ secrets.ASSIGNMENTS }}
+
+      
+
+
