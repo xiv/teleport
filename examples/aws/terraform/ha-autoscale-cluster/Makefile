@@ -33,9 +33,6 @@ TF_VAR_s3_bucket_name ?=
 # Email of your support org, used for Letsencrypt cert registration process.
 TF_VAR_email ?=
 
-# Setup grafana password for "admin" user. Grafana will be served on https://cluster.example.com:8443 after install
-TF_VAR_grafana_pass ?=
-
 # (optional) Set to true to use ACM (Amazon Certificate Manager) to provision certificates rather than Letsencrypt
 # If you wish to use a pre-existing ACM certificate rather than having Terraform generate one for you, you can import it:
 # terraform import aws_acm_certificate.cert <certificate_arn>

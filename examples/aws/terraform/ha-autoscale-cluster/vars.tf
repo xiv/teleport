@@ -38,12 +38,6 @@ variable "node_instance_type" {
   default = "t2.medium"
 }
 
-// Instance types used for monitor auto scale groups
-variable "monitor_instance_type" {
-  type    = string
-  default = "m4.large"
-}
-
 // SSH key name to provision instances withx
 variable "key_name" {
   type = string
@@ -119,25 +113,9 @@ variable "autoscale_max_write_capacity" {
   default = 100
 }
 
-// InfluxDB and Telegraf versions
-variable "influxdb_version" {
-  type    = string
-  default = "1.4.2"
-}
-
 variable "telegraf_version" {
   type    = string
   default = "1.5.1-1"
-}
-
-variable "grafana_version" {
-  type    = string
-  default = "4.6.3"
-}
-
-// Password for grafana admin user
-variable "grafana_pass" {
-  type = string
 }
 
 // Whether to use Amazon-issued certificates via ACM or not
