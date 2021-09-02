@@ -72,7 +72,7 @@ jobs:
 Every time pull request and pull request review events occur, the bot will check if all the required reviewers have approved. 
 
 ```yaml
-# Workflow will trigger on all pull request review event types
+# Example Check workflow
 name: Check
 on: 
   pull_request_review:
@@ -111,13 +111,13 @@ To know which reviewers to assign and check for, a hardcoded JSON object will be
 
 If an author is external or is not in `reviewers`, default reviewers will be assigned. Default reviewers will also be stored as a secret that is a string representing a list. 
 
-```
-  // Example default reviewers secret 
+```json
+  // Example `defaultreviewers` secret 
 
-  ["defaultreviewer1", "defaultreviewer2", "defaultreviewer3", "defaultreviewer4"]
+  ["defaultreviewer1", "defaultreviewer2", "defaultreviewer3"]
 ```
 
-### Dismissing Stale Runs Workflow
+### Dismissing Stale Runs 
 
 This workflow dismisses stale workflow runs every 30 minutes for every open pull request in the Teleport repository. There is a separate workflow for this because when a review event occurs on an external contributor's PR, the token in that context does not have the correct permissions. 
 
