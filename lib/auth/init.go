@@ -21,7 +21,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"fmt"
 	"net"
 	"strings"
@@ -33,20 +32,18 @@ import (
 	apievents "github.com/gravitational/teleport/api/types/events"
 	apisshutils "github.com/gravitational/teleport/api/utils/sshutils"
 	"github.com/gravitational/teleport/lib"
+	"github.com/gravitational/teleport/lib/auth/keystore"
 	"github.com/gravitational/teleport/lib/auth/u2f"
 	"github.com/gravitational/teleport/lib/backend"
-	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/events"
 	"github.com/gravitational/teleport/lib/modules"
 	"github.com/gravitational/teleport/lib/services"
 	"github.com/gravitational/teleport/lib/services/local"
 	"github.com/gravitational/teleport/lib/sshca"
-	"github.com/gravitational/teleport/lib/sshutils"
 	"github.com/gravitational/teleport/lib/tlsca"
 	"github.com/gravitational/teleport/lib/utils"
 
 	"github.com/gravitational/trace"
-	"github.com/pborman/uuid"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 )
@@ -62,6 +59,10 @@ type InitConfig struct {
 
 	// Authority is key generator that we use
 	Authority sshca.Authority
+
+	// KeyStoreConfig is the config for the KeyStore which handles private CA
+	// keys that may be held in an HSM.
+	KeyStoreConfig keystore.Config
 
 	// HostUUID is a UUID of this host
 	HostUUID string
@@ -120,6 +121,12 @@ type InitConfig struct {
 	// ClusterConfiguration is a services that holds cluster wide configuration.
 	ClusterConfiguration services.ClusterConfiguration
 
+	// Restrictions is a service to access network restrictions, etc
+	Restrictions services.Restrictions
+
+	// Databases is a service that manages database resources.
+	Databases services.Databases
+
 	// Roles is a set of roles to create
 	Roles []types.Role
 
@@ -165,6 +172,9 @@ type InitConfig struct {
 	// Streamer is events sessionstreamer, used to create continuous
 	// session related streams
 	Streamer events.Streamer
+
+	// WindowsServices is a service that manages Windows desktop resources.
+	WindowsDesktops services.WindowsDesktops
 }
 
 // Init instantiates and configures an instance of AuthServer
@@ -200,7 +210,7 @@ func Init(cfg InitConfig, opts ...ServerOption) (*Server, error) {
 		}
 		if firstStart {
 			log.Infof("Applying %v bootstrap resources (first initialization)", len(cfg.Resources))
-			if err := checkResourceConsistency(domainName, cfg.Resources...); err != nil {
+			if err := checkResourceConsistency(asrv.keyStore, domainName, cfg.Resources...); err != nil {
 				return nil, trace.Wrap(err, "refusing to bootstrap backend")
 			}
 			if err := local.CreateResources(ctx, cfg.Backend, cfg.Resources...); err != nil {
@@ -258,29 +268,14 @@ func Init(cfg InitConfig, opts ...ServerOption) (*Server, error) {
 		return nil, trace.Wrap(err)
 	}
 
-	err = initSetAuthPreference(asrv, cfg.AuthPreference)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-
-	// set cluster level config on the backend and then force a sync of the cache.
-	clusterConfig, err := asrv.GetClusterConfig()
-	if err != nil && !trace.IsNotFound(err) {
-		return nil, trace.Wrap(err)
-	}
-	// init a unique cluster ID, it must be set once only during the first
-	// start so if it's already there, reuse it
-	if clusterConfig != nil && clusterConfig.GetClusterID() != "" {
-		cfg.ClusterConfig.SetClusterID(clusterConfig.GetClusterID())
-	} else {
-		cfg.ClusterConfig.SetClusterID(uuid.New())
-	}
-	err = asrv.SetClusterConfig(cfg.ClusterConfig)
+	err = initSetAuthPreference(ctx, asrv, cfg.AuthPreference)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
 	// The first Auth Server that starts gets to set the name of the cluster.
+	// If a cluster name/ID is already stored in the backend, the attempt to set
+	// a new name returns an AlreadyExists error.
 	err = asrv.SetClusterName(cfg.ClusterName)
 	if err != nil && !trace.IsAlreadyExists(err) {
 		return nil, trace.Wrap(err)
@@ -302,10 +297,9 @@ func Init(cfg InitConfig, opts ...ServerOption) (*Server, error) {
 			log.Warnf(warnMessage,
 				cfg.ClusterName.GetClusterName(),
 				cn.GetClusterName())
-
-			// Override user passed in cluster name with what is in the backend.
-			cfg.ClusterName = cn
 		}
+		// Override user passed in cluster name with what is in the backend.
+		cfg.ClusterName = cn
 	}
 	log.Debugf("Cluster configuration: %v.", cfg.ClusterName)
 
@@ -316,7 +310,7 @@ func Init(cfg InitConfig, opts ...ServerOption) (*Server, error) {
 	log.Infof("Updating cluster configuration: %v.", cfg.StaticTokens)
 
 	// always create the default namespace
-	err = asrv.UpsertNamespace(types.NewNamespace(apidefaults.Namespace))
+	err = asrv.UpsertNamespace(types.DefaultNamespace())
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -332,139 +326,60 @@ func Init(cfg InitConfig, opts ...ServerOption) (*Server, error) {
 		log.Infof("Created default admin role: %q.", defaultRole.GetName())
 	}
 
-	// generate a user certificate authority if it doesn't exist
-	_, err = asrv.GetCertAuthority(types.CertAuthID{DomainName: cfg.ClusterName.GetClusterName(), Type: types.UserCA}, true)
-	if err != nil {
-		if !trace.IsNotFound(err) {
-			return nil, trace.Wrap(err)
-		}
-
-		log.Infof("First start: generating user certificate authority.")
-		priv, pub, err := asrv.GenerateKeyPair("")
+	// generate certificate authorities if they don't exist
+	for _, caType := range []types.CertAuthType{types.HostCA, types.UserCA, types.JWTSigner} {
+		caID := types.CertAuthID{Type: caType, DomainName: cfg.ClusterName.GetClusterName()}
+		ca, err := asrv.GetCertAuthority(caID, true)
 		if err != nil {
-			return nil, trace.Wrap(err)
-		}
-
-		keyPEM, certPEM, err := tlsca.GenerateSelfSignedCA(pkix.Name{
-			CommonName:   cfg.ClusterName.GetClusterName(),
-			Organization: []string{cfg.ClusterName.GetClusterName()},
-		}, nil, defaults.CATTL)
-		if err != nil {
-			return nil, trace.Wrap(err)
-		}
-		sigAlg := defaults.CASignatureAlgorithm
-		if cfg.CASigningAlg != nil && *cfg.CASigningAlg != "" {
-			sigAlg = *cfg.CASigningAlg
-		}
-
-		userCA := &types.CertAuthorityV2{
-			Kind:    types.KindCertAuthority,
-			Version: types.V2,
-			Metadata: types.Metadata{
-				Name:      cfg.ClusterName.GetClusterName(),
-				Namespace: apidefaults.Namespace,
-			},
-			Spec: types.CertAuthoritySpecV2{
-				ClusterName: cfg.ClusterName.GetClusterName(),
-				Type:        types.UserCA,
-				ActiveKeys: types.CAKeySet{
-					SSH: []*types.SSHKeyPair{{
-						PrivateKey: priv,
-						// TODO: update when HSMs are supported in the config
-						PrivateKeyType: types.PrivateKeyType_RAW,
-						PublicKey:      pub,
-					}},
-					TLS: []*types.TLSKeyPair{{
-						Cert: certPEM,
-						Key:  keyPEM,
-						// TODO: update when HSMs are supported in the config
-						KeyType: types.PrivateKeyType_RAW,
-					}},
-				},
-				SigningAlg: sshutils.ParseSigningAlg(sigAlg),
-			},
-		}
-
-		if err := asrv.Trust.UpsertCertAuthority(userCA); err != nil {
-			return nil, trace.Wrap(err)
+			if !trace.IsNotFound(err) {
+				return nil, trace.Wrap(err)
+			}
+			log.Infof("First start: generating %s certificate authority.", caID.Type)
+			if err := asrv.createSelfSignedCA(caID); err != nil {
+				return nil, trace.Wrap(err)
+			}
+		} else {
+			// Already have a CA. Make sure the keyStore has local keys.
+			if !asrv.keyStore.HasLocalActiveKeys(ca) {
+				// This could be one of a few cases:
+				// 1. A new auth server with an HSM being added to an HA cluster.
+				// 2. A new auth server with no HSM being added to an HA cluster
+				//    where all current auth servers have HSMs.
+				// 3. An existing auth server has restarted with a new HSM configured.
+				// 4. An existing HSM auth server has restarted no HSM configured.
+				// 5. An existing HSM auth server has restarted with a new UUID.
+				if ca.GetType() == types.HostCA {
+					// We need local keys to sign the Admin identity to support
+					// tctl. For this special case we add AdditionalTrustedKeys
+					// without any active keys. These keys will not be used for
+					// any signing operations until a CA rotation. Only the Host
+					// CA is necessary to issue the Admin identity.
+					if err := asrv.ensureLocalAdditionalKeys(ca); err != nil {
+						return nil, trace.Wrap(err)
+					}
+					// reload updated CA for below checks
+					if ca, err = asrv.GetCertAuthority(caID, true); err != nil {
+						return nil, trace.Wrap(err)
+					}
+				}
+			}
+			if !asrv.keyStore.HasLocalActiveKeys(ca) && asrv.keyStore.HasLocalAdditionalKeys(ca) {
+				log.Warnf("This auth server has a newly added or removed HSM and will not " +
+					"be able to perform any signing operations. You must rotate all CAs " +
+					"before routing traffic to this auth server. See https://goteleport.com/docs/admin-guide/#certificate-rotation")
+			}
+			if !ca.AllKeyTypesMatch() {
+				log.Warnf("%s CA contains a combination of raw and PKCS#11 keys. If you are attempting to"+
+					" configure HSM support, make sure it is configured on all auth servers in this"+
+					" cluster and then perform a CA rotation: https://goteleport.com/docs/admin-guide/#certificate-rotation", caID.Type)
+			}
 		}
 	}
 
-	// generate a host certificate authority if it doesn't exist
-	_, err = asrv.GetCertAuthority(types.CertAuthID{DomainName: cfg.ClusterName.GetClusterName(), Type: types.HostCA}, true)
-	if err != nil {
-		if !trace.IsNotFound(err) {
-			return nil, trace.Wrap(err)
-		}
-
-		log.Infof("First start: generating host certificate authority.")
-		priv, pub, err := asrv.GenerateKeyPair("")
-		if err != nil {
-			return nil, trace.Wrap(err)
-		}
-
-		keyPEM, certPEM, err := tlsca.GenerateSelfSignedCA(pkix.Name{
-			CommonName:   cfg.ClusterName.GetClusterName(),
-			Organization: []string{cfg.ClusterName.GetClusterName()},
-		}, nil, defaults.CATTL)
-		if err != nil {
-			return nil, trace.Wrap(err)
-		}
-		sigAlg := defaults.CASignatureAlgorithm
-		if cfg.CASigningAlg != nil && *cfg.CASigningAlg != "" {
-			sigAlg = *cfg.CASigningAlg
-		}
-
-		hostCA := &types.CertAuthorityV2{
-			Kind:    types.KindCertAuthority,
-			Version: types.V2,
-			Metadata: types.Metadata{
-				Name:      cfg.ClusterName.GetClusterName(),
-				Namespace: apidefaults.Namespace,
-			},
-			Spec: types.CertAuthoritySpecV2{
-				ClusterName: cfg.ClusterName.GetClusterName(),
-				Type:        types.HostCA,
-				ActiveKeys: types.CAKeySet{
-					SSH: []*types.SSHKeyPair{{
-						PrivateKey: priv,
-						// TODO: update when HSMs are supported in the config
-						PrivateKeyType: types.PrivateKeyType_RAW,
-						PublicKey:      pub,
-					}},
-					TLS: []*types.TLSKeyPair{{
-						Cert: certPEM,
-						Key:  keyPEM,
-						// TODO: update when HSMs are supported in the config
-						KeyType: types.PrivateKeyType_RAW,
-					}},
-				},
-				SigningAlg: sshutils.ParseSigningAlg(sigAlg),
-			},
-		}
-		if err := asrv.Trust.UpsertCertAuthority(hostCA); err != nil {
-			return nil, trace.Wrap(err)
-		}
-	}
-
-	// If a JWT signer does not exist for this cluster, create one.
-	_, err = asrv.GetCertAuthority(types.CertAuthID{
-		DomainName: cfg.ClusterName.GetClusterName(),
-		Type:       types.JWTSigner,
-	}, true)
-	if err != nil && !trace.IsNotFound(err) {
+	// Delete any unused keys from the keyStore. This is to avoid exhausting
+	// (or wasting) HSM resources.
+	if err := asrv.deleteUnusedKeys(); err != nil {
 		return nil, trace.Wrap(err)
-	}
-	if trace.IsNotFound(err) {
-		log.Infof("Migrate: Adding JWT key to existing cluster %q.", cfg.ClusterName.GetClusterName())
-
-		jwtSigner, err := services.NewJWTAuthority(cfg.ClusterName.GetClusterName())
-		if err != nil {
-			return nil, trace.Wrap(err)
-		}
-		if err := asrv.Trust.UpsertCertAuthority(jwtSigner); err != nil {
-			return nil, trace.Wrap(err)
-		}
 	}
 
 	if lib.IsInsecureDevMode() {
@@ -496,19 +411,17 @@ func Init(cfg InitConfig, opts ...ServerOption) (*Server, error) {
 	return asrv, nil
 }
 
-func initSetAuthPreference(asrv *Server, newAuthPref types.AuthPreference) error {
-	storedAuthPref, err := asrv.GetAuthPreference()
-	if err != nil {
-		if !trace.IsNotFound(err) {
-			return trace.Wrap(err)
-		}
+func initSetAuthPreference(ctx context.Context, asrv *Server, newAuthPref types.AuthPreference) error {
+	storedAuthPref, err := asrv.GetAuthPreference(ctx)
+	if err != nil && !trace.IsNotFound(err) {
+		return trace.Wrap(err)
 	}
 	shouldReplace, err := shouldInitReplaceResourceWithOrigin(storedAuthPref, newAuthPref)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 	if shouldReplace {
-		if err := asrv.SetAuthPreference(newAuthPref); err != nil {
+		if err := asrv.SetAuthPreference(ctx, newAuthPref); err != nil {
 			return trace.Wrap(err)
 		}
 		log.Infof("Updating cluster auth preference: %v.", newAuthPref)
@@ -518,10 +431,8 @@ func initSetAuthPreference(asrv *Server, newAuthPref types.AuthPreference) error
 
 func initSetClusterNetworkingConfig(ctx context.Context, asrv *Server, newNetConfig types.ClusterNetworkingConfig) error {
 	storedNetConfig, err := asrv.GetClusterNetworkingConfig(ctx)
-	if err != nil {
-		if !trace.IsNotFound(err) {
-			return trace.Wrap(err)
-		}
+	if err != nil && !trace.IsNotFound(err) {
+		return trace.Wrap(err)
 	}
 	shouldReplace, err := shouldInitReplaceResourceWithOrigin(storedNetConfig, newNetConfig)
 	if err != nil {
@@ -538,10 +449,8 @@ func initSetClusterNetworkingConfig(ctx context.Context, asrv *Server, newNetCon
 
 func initSetSessionRecordingConfig(ctx context.Context, asrv *Server, newRecConfig types.SessionRecordingConfig) error {
 	storedRecConfig, err := asrv.GetSessionRecordingConfig(ctx)
-	if err != nil {
-		if !trace.IsNotFound(err) {
-			return trace.Wrap(err)
-		}
+	if err != nil && !trace.IsNotFound(err) {
+		return trace.Wrap(err)
 	}
 	shouldReplace, err := shouldInitReplaceResourceWithOrigin(storedRecConfig, newRecConfig)
 	if err != nil {
@@ -609,6 +518,10 @@ func migrateLegacyResources(ctx context.Context, cfg InitConfig, asrv *Server) e
 
 	if err := migrateCertAuthorities(ctx, asrv); err != nil {
 		return trace.Wrap(err, "fail to migrate certificate authorities to the v7 storage format: %v; please report this at https://github.com/gravitational/teleport/issues/new?assignees=&labels=bug&template=bug_report.md including the *redacted* output of 'tctl get cert_authority'", err)
+	}
+
+	if err := migrateClusterID(ctx, asrv); err != nil {
+		return trace.Wrap(err)
 	}
 
 	return nil
@@ -831,7 +744,7 @@ func isFirstStart(authServer *Server, cfg InitConfig) (bool, error) {
 }
 
 // checkResourceConsistency checks far basic conflicting state issues.
-func checkResourceConsistency(clusterName string, resources ...types.Resource) error {
+func checkResourceConsistency(keyStore keystore.KeyStore, clusterName string, resources ...types.Resource) error {
 	for _, rsc := range resources {
 		switch r := rsc.(type) {
 		case types.CertAuthority:
@@ -839,7 +752,7 @@ func checkResourceConsistency(clusterName string, resources ...types.Resource) e
 			// all CAs for this cluster do having signing keys.
 			seemsLocal := r.GetClusterName() == clusterName
 			var hasKeys bool
-			_, err := sshPrivateKey(r)
+			_, err := keyStore.GetSSHSigner(r)
 			switch {
 			case err == nil:
 				hasKeys = true
@@ -1397,9 +1310,8 @@ func migrateCertAuthorities(ctx context.Context, asrv *Server) error {
 
 func migrateCertAuthority(ctx context.Context, asrv *Server, ca types.CertAuthority) error {
 	// Check if we need to migrate.
-	if ks := ca.GetActiveKeys(); len(ks.TLS) != 0 || len(ks.SSH) != 0 || len(ks.JWT) != 0 {
-		// Already using the new format.
-		return nil
+	if needsMigration, err := services.CertAuthorityNeedsMigration(ca); err != nil || !needsMigration {
+		return trace.Wrap(err)
 	}
 	log.Infof("Migrating %v to 7.0 storage format.", ca)
 	// CA rotation can cause weird edge cases during migration, don't allow
@@ -1408,7 +1320,7 @@ func migrateCertAuthority(ctx context.Context, asrv *Server, ca types.CertAuthor
 		return trace.BadParameter("CA rotation is in progress; please finish CA rotation before upgrading teleport")
 	}
 
-	if err := services.FillNewCertAuthorityKeys(ca); err != nil {
+	if err := services.SyncCertAuthorityKeys(ca); err != nil {
 		return trace.Wrap(err)
 	}
 
@@ -1420,5 +1332,34 @@ func migrateCertAuthority(ctx context.Context, asrv *Server, ca types.CertAuthor
 		return trace.Wrap(err, "failed storing the migrated CA: %v", err)
 	}
 	log.Infof("Successfully migrated %v to 7.0 storage format.", ca)
+	return nil
+}
+
+// DELETE IN: 8.0.0
+// migrateClusterID moves the cluster ID information
+// from ClusterConfig to ClusterName.
+func migrateClusterID(ctx context.Context, asrv *Server) error {
+	clusterConfig, err := asrv.ClusterConfiguration.GetClusterConfig()
+	if err != nil {
+		if trace.IsNotFound(err) {
+			return nil
+		}
+		return trace.Wrap(err)
+	}
+
+	clusterName, err := asrv.ClusterConfiguration.GetClusterName()
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	if clusterName.GetClusterID() == clusterConfig.GetLegacyClusterID() {
+		return nil
+	}
+
+	log.Infof("Migrating cluster ID %q from legacy ClusterConfig to ClusterName.", clusterConfig.GetLegacyClusterID())
+
+	clusterName.SetClusterID(clusterConfig.GetLegacyClusterID())
+	if err := asrv.ClusterConfiguration.UpsertClusterName(clusterName); err != nil {
+		return trace.Wrap(err)
+	}
 	return nil
 }

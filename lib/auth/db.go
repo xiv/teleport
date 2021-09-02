@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Gravitational, Inc.
+Copyright 2021 Gravitational, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -49,7 +49,11 @@ func (s *Server) GenerateDatabaseCert(ctx context.Context, req *proto.DatabaseCe
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	tlsCA, err := tlsca.FromAuthority(hostCA)
+	caCert, signer, err := s.GetKeyStore().GetTLSCertAndSigner(hostCA)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	tlsCA, err := tlsca.FromCertAndSigner(caCert, signer)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -80,7 +84,7 @@ func (s *Server) GenerateDatabaseCert(ctx context.Context, req *proto.DatabaseCe
 func (s *Server) SignDatabaseCSR(ctx context.Context, req *proto.DatabaseCSRRequest) (*proto.DatabaseCSRResponse, error) {
 	if !modules.GetModules().Features().DB {
 		return nil, trace.AccessDenied(
-			"this Teleport cluster doesn't support database access, please contact the cluster administrator")
+			"this Teleport cluster is not licensed for database access, please contact the cluster administrator")
 	}
 
 	log.Debugf("Signing database CSR for cluster %v.", req.ClusterName)
@@ -140,7 +144,11 @@ func (s *Server) SignDatabaseCSR(ctx context.Context, req *proto.DatabaseCSRRequ
 		return nil, trace.Wrap(err)
 	}
 
-	tlsAuthority, err := tlsca.FromAuthority(userCA)
+	cert, signer, err := s.GetKeyStore().GetTLSCertAndSigner(userCA)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	tlsAuthority, err := tlsca.FromCertAndSigner(cert, signer)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

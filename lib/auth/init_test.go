@@ -40,6 +40,7 @@ import (
 	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/fixtures"
 	"github.com/gravitational/teleport/lib/services"
+	"github.com/gravitational/teleport/lib/services/local"
 	"github.com/gravitational/teleport/lib/services/suite"
 	"github.com/gravitational/teleport/lib/sshutils"
 	"github.com/gravitational/teleport/lib/utils"
@@ -59,16 +60,18 @@ func TestReadIdentity(t *testing.T) {
 	a := testauthority.NewWithClock(clock)
 	priv, pub, err := a.GenerateKeyPair("")
 	require.NoError(t, err)
+	caSigner, err := ssh.ParsePrivateKey(priv)
+	require.NoError(t, err)
 
 	cert, err := a.GenerateHostCert(services.HostCertParams{
-		PrivateCASigningKey: priv,
-		CASigningAlg:        defaults.CASignatureAlgorithm,
-		PublicHostKey:       pub,
-		HostID:              "id1",
-		NodeName:            "node-name",
-		ClusterName:         "example.com",
-		Roles:               types.SystemRoles{types.RoleNode},
-		TTL:                 0,
+		CASigner:      caSigner,
+		CASigningAlg:  defaults.CASignatureAlgorithm,
+		PublicHostKey: pub,
+		HostID:        "id1",
+		NodeName:      "node-name",
+		ClusterName:   "example.com",
+		Roles:         types.SystemRoles{types.RoleNode},
+		TTL:           0,
 	})
 	require.NoError(t, err)
 
@@ -83,14 +86,14 @@ func TestReadIdentity(t *testing.T) {
 	ttl := 10 * time.Second
 	expiryDate := clock.Now().Add(ttl)
 	bytes, err := a.GenerateHostCert(services.HostCertParams{
-		PrivateCASigningKey: priv,
-		CASigningAlg:        defaults.CASignatureAlgorithm,
-		PublicHostKey:       pub,
-		HostID:              "id1",
-		NodeName:            "node-name",
-		ClusterName:         "example.com",
-		Roles:               types.SystemRoles{types.RoleNode},
-		TTL:                 ttl,
+		CASigner:      caSigner,
+		CASigningAlg:  defaults.CASignatureAlgorithm,
+		PublicHostKey: pub,
+		HostID:        "id1",
+		NodeName:      "node-name",
+		ClusterName:   "example.com",
+		Roles:         types.SystemRoles{types.RoleNode},
+		TTL:           ttl,
 	})
 	require.NoError(t, err)
 	copy, err := apisshutils.ParseCertificate(bytes)
@@ -102,6 +105,8 @@ func TestBadIdentity(t *testing.T) {
 	a := testauthority.New()
 	priv, pub, err := a.GenerateKeyPair("")
 	require.NoError(t, err)
+	caSigner, err := ssh.ParsePrivateKey(priv)
+	require.NoError(t, err)
 
 	// bad cert type
 	_, err = ReadSSHIdentityFromKeyPair(priv, pub)
@@ -109,14 +114,14 @@ func TestBadIdentity(t *testing.T) {
 
 	// missing authority domain
 	cert, err := a.GenerateHostCert(services.HostCertParams{
-		PrivateCASigningKey: priv,
-		CASigningAlg:        defaults.CASignatureAlgorithm,
-		PublicHostKey:       pub,
-		HostID:              "id2",
-		NodeName:            "",
-		ClusterName:         "",
-		Roles:               types.SystemRoles{types.RoleNode},
-		TTL:                 0,
+		CASigner:      caSigner,
+		CASigningAlg:  defaults.CASignatureAlgorithm,
+		PublicHostKey: pub,
+		HostID:        "id2",
+		NodeName:      "",
+		ClusterName:   "",
+		Roles:         types.SystemRoles{types.RoleNode},
+		TTL:           0,
 	})
 	require.NoError(t, err)
 
@@ -125,14 +130,14 @@ func TestBadIdentity(t *testing.T) {
 
 	// missing host uuid
 	cert, err = a.GenerateHostCert(services.HostCertParams{
-		PrivateCASigningKey: priv,
-		CASigningAlg:        defaults.CASignatureAlgorithm,
-		PublicHostKey:       pub,
-		HostID:              "example.com",
-		NodeName:            "",
-		ClusterName:         "",
-		Roles:               types.SystemRoles{types.RoleNode},
-		TTL:                 0,
+		CASigner:      caSigner,
+		CASigningAlg:  defaults.CASignatureAlgorithm,
+		PublicHostKey: pub,
+		HostID:        "example.com",
+		NodeName:      "",
+		ClusterName:   "",
+		Roles:         types.SystemRoles{types.RoleNode},
+		TTL:           0,
 	})
 	require.NoError(t, err)
 
@@ -141,14 +146,14 @@ func TestBadIdentity(t *testing.T) {
 
 	// unrecognized role
 	cert, err = a.GenerateHostCert(services.HostCertParams{
-		PrivateCASigningKey: priv,
-		CASigningAlg:        defaults.CASignatureAlgorithm,
-		PublicHostKey:       pub,
-		HostID:              "example.com",
-		NodeName:            "",
-		ClusterName:         "id1",
-		Roles:               types.SystemRoles{types.SystemRole("bad role")},
-		TTL:                 0,
+		CASigner:      caSigner,
+		CASigningAlg:  defaults.CASignatureAlgorithm,
+		PublicHostKey: pub,
+		HostID:        "example.com",
+		NodeName:      "",
+		ClusterName:   "id1",
+		Roles:         types.SystemRoles{types.SystemRole("bad role")},
+		TTL:           0,
 	})
 	require.NoError(t, err)
 
@@ -157,9 +162,9 @@ func TestBadIdentity(t *testing.T) {
 }
 
 type testDynamicallyConfigurableParams struct {
-	withDefaults, withConfigFile, withAnotherConfigFile func(*InitConfig) types.ResourceWithOrigin
-	setDynamic                                          func(*Server)
-	getStored                                           func(*Server) types.ResourceWithOrigin
+	withDefaults, withConfigFile, withAnotherConfigFile func(*testing.T, *InitConfig) types.ResourceWithOrigin
+	setDynamic                                          func(*testing.T, *Server)
+	getStored                                           func(*testing.T, *Server) types.ResourceWithOrigin
 }
 
 func testDynamicallyConfigurable(t *testing.T, p testDynamicallyConfigurableParams) {
@@ -175,19 +180,19 @@ func testDynamicallyConfigurable(t *testing.T, p testDynamicallyConfigurablePara
 		conf := setupConfig(t)
 
 		// Simulate a server with a config-file resource.
-		configFileRes := p.withConfigFile(&conf)
+		configFileRes := p.withConfigFile(t, &conf)
 		authServer := initAuthServer(t, conf)
 
-		stored := p.getStored(authServer)
+		stored := p.getStored(t, authServer)
 		require.Equal(t, types.OriginConfigFile, stored.Origin())
 		require.Empty(t, resourceDiff(configFileRes, stored))
 
 		// Reinitialize with the default resource.
-		defaultRes := p.withDefaults(&conf)
+		defaultRes := p.withDefaults(t, &conf)
 		authServer = initAuthServer(t, conf)
 
 		// Verify the stored resource is now labelled as originating from defaults.
-		stored = p.getStored(authServer)
+		stored = p.getStored(t, authServer)
 		require.Equal(t, types.OriginDefaults, stored.Origin())
 		require.Empty(t, resourceDiff(defaultRes, stored))
 	})
@@ -198,17 +203,17 @@ func testDynamicallyConfigurable(t *testing.T, p testDynamicallyConfigurablePara
 
 		// Simulate a server with dynamic configuration.
 		authServer := initAuthServer(t, conf)
-		p.setDynamic(authServer)
+		p.setDynamic(t, authServer)
 
-		dynamic := p.getStored(authServer)
+		dynamic := p.getStored(t, authServer)
 		require.Equal(t, types.OriginDynamic, dynamic.Origin())
 
 		// Attempt to reinitialize with the default resource should be a no-op.
-		p.withDefaults(&conf)
+		p.withDefaults(t, &conf)
 		authServer = initAuthServer(t, conf)
 
 		// Verify the stored resource remains unchanged.
-		stored := p.getStored(authServer)
+		stored := p.getStored(t, authServer)
 		require.Equal(t, types.OriginDynamic, stored.Origin())
 		require.Empty(t, resourceDiff(dynamic, stored))
 	})
@@ -219,17 +224,17 @@ func testDynamicallyConfigurable(t *testing.T, p testDynamicallyConfigurablePara
 
 		// Simulate a server with dynamic configuration.
 		authServer := initAuthServer(t, conf)
-		p.setDynamic(authServer)
+		p.setDynamic(t, authServer)
 
-		dynamic := p.getStored(authServer)
+		dynamic := p.getStored(t, authServer)
 		require.Equal(t, types.OriginDynamic, dynamic.Origin())
 
 		// Reinitialize with a config-file resource.
-		configFileRes := p.withConfigFile(&conf)
+		configFileRes := p.withConfigFile(t, &conf)
 		authServer = initAuthServer(t, conf)
 
 		// Verify the stored resource is updated.
-		stored := p.getStored(authServer)
+		stored := p.getStored(t, authServer)
 		require.Equal(t, types.OriginConfigFile, stored.Origin())
 		require.Empty(t, resourceDiff(configFileRes, stored))
 	})
@@ -239,19 +244,19 @@ func testDynamicallyConfigurable(t *testing.T, p testDynamicallyConfigurablePara
 		conf := setupConfig(t)
 
 		// Simulate a server with the default resource.
-		defaultRes := p.withDefaults(&conf)
+		defaultRes := p.withDefaults(t, &conf)
 		authServer := initAuthServer(t, conf)
 
-		stored := p.getStored(authServer)
+		stored := p.getStored(t, authServer)
 		require.Equal(t, types.OriginDefaults, stored.Origin())
 		require.Empty(t, resourceDiff(defaultRes, stored))
 
 		// Reinitialize with a config-file resource.
-		configFileRes := p.withConfigFile(&conf)
+		configFileRes := p.withConfigFile(t, &conf)
 		authServer = initAuthServer(t, conf)
 
 		// Verify the stored resource is updated.
-		stored = p.getStored(authServer)
+		stored = p.getStored(t, authServer)
 		require.Equal(t, types.OriginConfigFile, stored.Origin())
 		require.Empty(t, resourceDiff(configFileRes, stored))
 	})
@@ -261,19 +266,19 @@ func testDynamicallyConfigurable(t *testing.T, p testDynamicallyConfigurablePara
 		conf := setupConfig(t)
 
 		// Simulate a server with a config-file resource.
-		configFileRes := p.withConfigFile(&conf)
+		configFileRes := p.withConfigFile(t, &conf)
 		authServer := initAuthServer(t, conf)
 
-		stored := p.getStored(authServer)
+		stored := p.getStored(t, authServer)
 		require.Equal(t, types.OriginConfigFile, stored.Origin())
 		require.Empty(t, resourceDiff(configFileRes, stored))
 
 		// Reinitialize with another config-file resource.
-		anotherConfigFileRes := p.withAnotherConfigFile(&conf)
+		anotherConfigFileRes := p.withAnotherConfigFile(t, &conf)
 		authServer = initAuthServer(t, conf)
 
 		// Verify the stored resource is updated.
-		stored = p.getStored(authServer)
+		stored = p.getStored(t, authServer)
 		require.Equal(t, types.OriginConfigFile, stored.Origin())
 		require.Empty(t, resourceDiff(anotherConfigFileRes, stored))
 	})
@@ -281,36 +286,35 @@ func testDynamicallyConfigurable(t *testing.T, p testDynamicallyConfigurablePara
 
 func TestAuthPreference(t *testing.T) {
 	t.Parallel()
-
-	fromConfigFile, err := types.NewAuthPreferenceFromConfigFile(types.AuthPreferenceSpecV2{
-		Type: constants.OIDC,
-	})
-	require.NoError(t, err)
-
-	dynamically, err := types.NewAuthPreference(types.AuthPreferenceSpecV2{
-		SecondFactor: constants.SecondFactorOff,
-	})
-	require.NoError(t, err)
+	ctx := context.Background()
 
 	testDynamicallyConfigurable(t, testDynamicallyConfigurableParams{
-		withDefaults: func(conf *InitConfig) types.ResourceWithOrigin {
+		withDefaults: func(t *testing.T, conf *InitConfig) types.ResourceWithOrigin {
 			conf.AuthPreference = types.DefaultAuthPreference()
 			return conf.AuthPreference
 		},
-		withConfigFile: func(conf *InitConfig) types.ResourceWithOrigin {
+		withConfigFile: func(t *testing.T, conf *InitConfig) types.ResourceWithOrigin {
+			fromConfigFile, err := types.NewAuthPreferenceFromConfigFile(types.AuthPreferenceSpecV2{
+				Type: constants.OIDC,
+			})
+			require.NoError(t, err)
 			conf.AuthPreference = fromConfigFile
 			return conf.AuthPreference
 		},
-		withAnotherConfigFile: func(conf *InitConfig) types.ResourceWithOrigin {
+		withAnotherConfigFile: func(t *testing.T, conf *InitConfig) types.ResourceWithOrigin {
 			conf.AuthPreference = newU2FAuthPreferenceFromConfigFile(t)
 			return conf.AuthPreference
 		},
-		setDynamic: func(authServer *Server) {
-			err := authServer.SetAuthPreference(dynamically)
+		setDynamic: func(t *testing.T, authServer *Server) {
+			dynamically, err := types.NewAuthPreference(types.AuthPreferenceSpecV2{
+				SecondFactor: constants.SecondFactorOff,
+			})
+			require.NoError(t, err)
+			err = authServer.SetAuthPreference(ctx, dynamically)
 			require.NoError(t, err)
 		},
-		getStored: func(authServer *Server) types.ResourceWithOrigin {
-			authPref, err := authServer.GetAuthPreference()
+		getStored: func(t *testing.T, authServer *Server) types.ResourceWithOrigin {
+			authPref, err := authServer.GetAuthPreference(ctx)
 			require.NoError(t, err)
 			return authPref
 		},
@@ -321,41 +325,38 @@ func TestClusterNetworkingConfig(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	fromConfigFile, err := types.NewClusterNetworkingConfigFromConfigFile(types.ClusterNetworkingConfigSpecV2{
-		ClientIdleTimeout: types.Duration(7 * time.Minute),
-	})
-	require.NoError(t, err)
-
-	anotherFromConfigFile, err := types.NewClusterNetworkingConfigFromConfigFile(types.ClusterNetworkingConfigSpecV2{
-		ClientIdleTimeout: types.Duration(10 * time.Minute),
-		KeepAliveInterval: types.Duration(3 * time.Minute),
-	})
-	require.NoError(t, err)
-
-	dynamically, err := types.NewClusterNetworkingConfigFromConfigFile(types.ClusterNetworkingConfigSpecV2{
-		KeepAliveInterval: types.Duration(4 * time.Minute),
-	})
-	require.NoError(t, err)
-	dynamically.SetOrigin(types.OriginDynamic)
-
 	testDynamicallyConfigurable(t, testDynamicallyConfigurableParams{
-		withDefaults: func(conf *InitConfig) types.ResourceWithOrigin {
+		withDefaults: func(t *testing.T, conf *InitConfig) types.ResourceWithOrigin {
 			conf.ClusterNetworkingConfig = types.DefaultClusterNetworkingConfig()
 			return conf.ClusterNetworkingConfig
 		},
-		withConfigFile: func(conf *InitConfig) types.ResourceWithOrigin {
+		withConfigFile: func(t *testing.T, conf *InitConfig) types.ResourceWithOrigin {
+			fromConfigFile, err := types.NewClusterNetworkingConfigFromConfigFile(types.ClusterNetworkingConfigSpecV2{
+				ClientIdleTimeout: types.Duration(7 * time.Minute),
+			})
+			require.NoError(t, err)
 			conf.ClusterNetworkingConfig = fromConfigFile
 			return conf.ClusterNetworkingConfig
 		},
-		withAnotherConfigFile: func(conf *InitConfig) types.ResourceWithOrigin {
+		withAnotherConfigFile: func(t *testing.T, conf *InitConfig) types.ResourceWithOrigin {
+			anotherFromConfigFile, err := types.NewClusterNetworkingConfigFromConfigFile(types.ClusterNetworkingConfigSpecV2{
+				ClientIdleTimeout: types.Duration(10 * time.Minute),
+				KeepAliveInterval: types.Duration(3 * time.Minute),
+			})
+			require.NoError(t, err)
 			conf.ClusterNetworkingConfig = anotherFromConfigFile
 			return conf.ClusterNetworkingConfig
 		},
-		setDynamic: func(authServer *Server) {
-			err := authServer.SetClusterNetworkingConfig(ctx, dynamically)
+		setDynamic: func(t *testing.T, authServer *Server) {
+			dynamically, err := types.NewClusterNetworkingConfigFromConfigFile(types.ClusterNetworkingConfigSpecV2{
+				KeepAliveInterval: types.Duration(4 * time.Minute),
+			})
+			require.NoError(t, err)
+			dynamically.SetOrigin(types.OriginDynamic)
+			err = authServer.SetClusterNetworkingConfig(ctx, dynamically)
 			require.NoError(t, err)
 		},
-		getStored: func(authServer *Server) types.ResourceWithOrigin {
+		getStored: func(t *testing.T, authServer *Server) types.ResourceWithOrigin {
 			authPref, err := authServer.GetClusterNetworkingConfig(ctx)
 			require.NoError(t, err)
 			return authPref
@@ -367,40 +368,37 @@ func TestSessionRecordingConfig(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	fromConfigFile, err := types.NewSessionRecordingConfigFromConfigFile(types.SessionRecordingConfigSpecV2{
-		Mode: types.RecordOff,
-	})
-	require.NoError(t, err)
-
-	anotherFromConfigFile, err := types.NewSessionRecordingConfigFromConfigFile(types.SessionRecordingConfigSpecV2{
-		Mode: types.RecordAtProxySync,
-	})
-	require.NoError(t, err)
-
-	dynamically, err := types.NewSessionRecordingConfigFromConfigFile(types.SessionRecordingConfigSpecV2{
-		Mode: types.RecordAtNodeSync,
-	})
-	require.NoError(t, err)
-	dynamically.SetOrigin(types.OriginDynamic)
-
 	testDynamicallyConfigurable(t, testDynamicallyConfigurableParams{
-		withDefaults: func(conf *InitConfig) types.ResourceWithOrigin {
+		withDefaults: func(t *testing.T, conf *InitConfig) types.ResourceWithOrigin {
 			conf.SessionRecordingConfig = types.DefaultSessionRecordingConfig()
 			return conf.SessionRecordingConfig
 		},
-		withConfigFile: func(conf *InitConfig) types.ResourceWithOrigin {
+		withConfigFile: func(t *testing.T, conf *InitConfig) types.ResourceWithOrigin {
+			fromConfigFile, err := types.NewSessionRecordingConfigFromConfigFile(types.SessionRecordingConfigSpecV2{
+				Mode: types.RecordOff,
+			})
+			require.NoError(t, err)
 			conf.SessionRecordingConfig = fromConfigFile
 			return conf.SessionRecordingConfig
 		},
-		withAnotherConfigFile: func(conf *InitConfig) types.ResourceWithOrigin {
+		withAnotherConfigFile: func(t *testing.T, conf *InitConfig) types.ResourceWithOrigin {
+			anotherFromConfigFile, err := types.NewSessionRecordingConfigFromConfigFile(types.SessionRecordingConfigSpecV2{
+				Mode: types.RecordAtProxySync,
+			})
+			require.NoError(t, err)
 			conf.SessionRecordingConfig = anotherFromConfigFile
 			return conf.SessionRecordingConfig
 		},
-		setDynamic: func(authServer *Server) {
-			err := authServer.SetSessionRecordingConfig(ctx, dynamically)
+		setDynamic: func(t *testing.T, authServer *Server) {
+			dynamically, err := types.NewSessionRecordingConfigFromConfigFile(types.SessionRecordingConfigSpecV2{
+				Mode: types.RecordAtNodeSync,
+			})
+			require.NoError(t, err)
+			dynamically.SetOrigin(types.OriginDynamic)
+			err = authServer.SetSessionRecordingConfig(ctx, dynamically)
 			require.NoError(t, err)
 		},
-		getStored: func(authServer *Server) types.ResourceWithOrigin {
+		getStored: func(t *testing.T, authServer *Server) types.ResourceWithOrigin {
 			authPref, err := authServer.GetSessionRecordingConfig(ctx)
 			require.NoError(t, err)
 			return authPref
@@ -414,7 +412,7 @@ func TestClusterID(t *testing.T) {
 	require.NoError(t, err)
 	defer authServer.Close()
 
-	cc, err := authServer.GetClusterConfig()
+	cc, err := authServer.GetClusterName()
 	require.NoError(t, err)
 	clusterID := cc.GetClusterID()
 	require.NotEqual(t, clusterID, "")
@@ -424,7 +422,7 @@ func TestClusterID(t *testing.T) {
 	require.NoError(t, err)
 	defer authServer.Close()
 
-	cc, err = authServer.GetClusterConfig()
+	cc, err = authServer.GetClusterName()
 	require.NoError(t, err)
 	require.Equal(t, cc.GetClusterID(), clusterID)
 }
@@ -439,7 +437,7 @@ func TestClusterName(t *testing.T) {
 	// Start the auth server with a different cluster name. The auth server
 	// should start, but with the original name.
 	newConfig := conf
-	newConfig.ClusterName, err = types.NewClusterName(types.ClusterNameSpecV2{
+	newConfig.ClusterName, err = services.NewClusterNameWithRandomID(types.ClusterNameSpecV2{
 		ClusterName: "dev.localhost",
 	})
 	require.NoError(t, err)
@@ -768,7 +766,7 @@ func TestMigrateOSS(t *testing.T) {
 		err := as.CreateRole(services.NewAdminRole())
 		require.NoError(t, err)
 
-		connector := types.NewGithubConnector("github", types.GithubConnectorSpecV3{
+		connector, err := types.NewGithubConnector("github", types.GithubConnectorSpecV3{
 			ClientID:     "aaa",
 			ClientSecret: "bbb",
 			RedirectURL:  "https://localhost:3080/v1/webapi/github/callback",
@@ -789,6 +787,7 @@ func TestMigrateOSS(t *testing.T) {
 				},
 			},
 		})
+		require.NoError(t, err)
 
 		err = as.CreateGithubConnector(connector)
 		require.NoError(t, err)
@@ -831,13 +830,44 @@ func TestMigrateOSS(t *testing.T) {
 	})
 }
 
+func TestMigrateClusterID(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	as := newTestAuthServer(ctx, t)
+
+	const legacyClusterID = "legacy-cluster-id"
+	clusterConfig, err := types.NewClusterConfig(types.ClusterConfigSpecV3{
+		ClusterID: legacyClusterID,
+	})
+	require.NoError(t, err)
+	err = as.ClusterConfiguration.(*local.ClusterConfigurationService).ForceSetClusterConfig(clusterConfig)
+	require.NoError(t, err)
+
+	clusterName, err := types.NewClusterName(types.ClusterNameSpecV2{
+		ClusterName: "localhost",
+	})
+	require.NoError(t, err)
+	require.Error(t, as.SetClusterName(clusterName))
+	require.NoError(t, as.ClusterConfiguration.(*local.ClusterConfigurationService).ForceSetClusterName(clusterName))
+
+	clusterName, err = as.GetClusterName()
+	require.NoError(t, err)
+	require.Empty(t, clusterName.GetClusterID())
+
+	require.NoError(t, migrateClusterID(ctx, as))
+
+	clusterName, err = as.GetClusterName()
+	require.NoError(t, err)
+	require.Equal(t, legacyClusterID, clusterName.GetClusterID())
+}
+
 func setupConfig(t *testing.T) InitConfig {
 	tempDir := t.TempDir()
 
 	bk, err := lite.New(context.TODO(), backend.Params{"path": tempDir})
 	require.NoError(t, err)
 
-	clusterName, err := types.NewClusterName(types.ClusterNameSpecV2{
+	clusterName, err := services.NewClusterNameWithRandomID(types.ClusterNameSpecV2{
 		ClusterName: "me.localhost",
 	})
 	require.NoError(t, err)
@@ -848,12 +878,12 @@ func setupConfig(t *testing.T) InitConfig {
 		NodeName:                "foo",
 		Backend:                 bk,
 		Authority:               testauthority.New(),
-		ClusterConfig:           services.DefaultClusterConfig(),
 		ClusterAuditConfig:      types.DefaultClusterAuditConfig(),
+		ClusterConfig:           types.DefaultClusterConfig(),
 		ClusterNetworkingConfig: types.DefaultClusterNetworkingConfig(),
 		SessionRecordingConfig:  types.DefaultSessionRecordingConfig(),
 		ClusterName:             clusterName,
-		StaticTokens:            services.DefaultStaticTokens(),
+		StaticTokens:            types.DefaultStaticTokens(),
 		AuthPreference:          types.DefaultAuthPreference(),
 		SkipPeriodicOperations:  true,
 	}
@@ -912,7 +942,8 @@ func TestMigrateCertAuthorities(t *testing.T) {
 		},
 	} {
 		t.Run(fmt.Sprintf("create %v CA", spec.Type), func(t *testing.T) {
-			ca := types.NewCertAuthority(spec)
+			ca, err := types.NewCertAuthority(spec)
+			require.NoError(t, err)
 			// Do NOT use services.MarshalCertAuthority to keep all fields as-is.
 			enc, err := utils.FastMarshal(ca)
 			require.NoError(t, err)
@@ -978,4 +1009,10 @@ func TestMigrateCertAuthorities(t *testing.T) {
 			Rotation:    &types.Rotation{State: types.RotationStateStandby},
 		},
 	}))
+}
+
+func resourceDiff(res1, res2 types.Resource) string {
+	return cmp.Diff(res1, res2,
+		cmpopts.IgnoreFields(types.Metadata{}, "ID", "Namespace"),
+		cmpopts.EquateEmpty())
 }

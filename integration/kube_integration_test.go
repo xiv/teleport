@@ -44,7 +44,6 @@ import (
 	"github.com/gravitational/teleport/lib"
 	"github.com/gravitational/teleport/lib/auth/testauthority"
 	"github.com/gravitational/teleport/lib/events"
-	kubeproxy "github.com/gravitational/teleport/lib/kube/proxy"
 	kubeutils "github.com/gravitational/teleport/lib/kube/utils"
 	"github.com/gravitational/teleport/lib/service"
 	"github.com/gravitational/teleport/lib/services"
@@ -94,8 +93,6 @@ func newKubeSuite(t *testing.T) *KubeSuite {
 		kubeConfigPath: os.Getenv(teleport.EnvKubeConfig),
 	}
 	require.NotEmpty(t, suite.kubeConfigPath, "This test requires path to valid kubeconfig.")
-
-	kubeproxy.TestOnlySkipSelfPermissionCheck(true)
 
 	var err error
 	SetTestTimeouts(time.Millisecond * time.Duration(100))
@@ -192,7 +189,7 @@ func testKubeExec(t *testing.T, suite *KubeSuite) {
 	require.NoError(t, err)
 	teleport.AddUserWithRole(username, role)
 
-	err = teleport.CreateEx(nil, tconf)
+	err = teleport.CreateEx(t, nil, tconf)
 	require.NoError(t, err)
 
 	err = teleport.Start()
@@ -366,7 +363,7 @@ func testKubeDeny(t *testing.T, suite *KubeSuite) {
 	require.NoError(t, err)
 	teleport.AddUserWithRole(username, role)
 
-	err = teleport.CreateEx(nil, tconf)
+	err = teleport.CreateEx(t, nil, tconf)
 	require.NoError(t, err)
 
 	err = teleport.Start()
@@ -413,7 +410,7 @@ func testKubePortForward(t *testing.T, suite *KubeSuite) {
 	require.NoError(t, err)
 	teleport.AddUserWithRole(username, role)
 
-	err = teleport.CreateEx(nil, tconf)
+	err = teleport.CreateEx(t, nil, tconf)
 	require.NoError(t, err)
 
 	err = teleport.Start()
@@ -526,10 +523,10 @@ func testKubeTrustedClustersClientCert(t *testing.T, suite *KubeSuite) {
 	defer lib.SetInsecureDevMode(false)
 
 	mainConf.Proxy.Kube.Enabled = true
-	err = main.CreateEx(nil, mainConf)
+	err = main.CreateEx(t, nil, mainConf)
 	require.NoError(t, err)
 
-	err = aux.CreateEx(nil, auxConf)
+	err = aux.CreateEx(t, nil, auxConf)
 	require.NoError(t, err)
 
 	// auxiliary cluster has a role aux-kube
@@ -784,10 +781,10 @@ func testKubeTrustedClustersSNI(t *testing.T, suite *KubeSuite) {
 	// ClusterOverride forces connection to be routed
 	// to cluster aux
 	mainConf.Proxy.Kube.ClusterOverride = clusterAux
-	err = main.CreateEx(nil, mainConf)
+	err = main.CreateEx(t, nil, mainConf)
 	require.NoError(t, err)
 
-	err = aux.CreateEx(nil, auxConf)
+	err = aux.CreateEx(t, nil, auxConf)
 	require.NoError(t, err)
 
 	// auxiliary cluster has a role aux-kube
@@ -1045,7 +1042,7 @@ func runKubeDisconnectTest(t *testing.T, suite *KubeSuite, tc disconnectTestCase
 	require.NoError(t, err)
 	teleport.AddUserWithRole(username, role)
 
-	err = teleport.CreateEx(nil, tconf)
+	err = teleport.CreateEx(t, nil, tconf)
 	require.NoError(t, err)
 
 	err = teleport.Start()
@@ -1183,7 +1180,11 @@ func kubeProxyClient(cfg kubeProxyConfig) (*kubernetes.Clientset, *rest.Config, 
 	if err != nil {
 		return nil, nil, trace.Wrap(err)
 	}
-	tlsCA, err := tlsca.FromAuthority(ca)
+	caCert, signer, err := authServer.GetKeyStore().GetTLSCertAndSigner(ca)
+	if err != nil {
+		return nil, nil, trace.Wrap(err)
+	}
+	tlsCA, err := tlsca.FromCertAndSigner(caCert, signer)
 	if err != nil {
 		return nil, nil, trace.Wrap(err)
 	}
