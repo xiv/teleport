@@ -2484,6 +2484,7 @@ func (process *TeleportProcess) setupProxyListeners() (*proxyListeners, error) {
 		return nil, trace.Wrap(err)
 	}
 
+	useSeparatePostgresListener := !cfg.Proxy.PostgresAddr.IsEmpty()
 	if cfg.Proxy.Kube.Enabled && !cfg.Proxy.Kube.ListenAddr.IsEmpty() {
 		process.log.Debugf("Setup Proxy: turning on Kubernetes proxy.")
 		listener, err := process.importOrCreateListener(listenerProxyKube, cfg.Proxy.Kube.ListenAddr.Addr)
@@ -2517,7 +2518,7 @@ func (process *TeleportProcess) setupProxyListeners() (*proxyListeners, error) {
 			Listener:            listener,
 			DisableTLS:          cfg.Proxy.DisableWebService,
 			DisableSSH:          cfg.Proxy.DisableReverseTunnel,
-			DisableDB:           cfg.Proxy.DisableDatabaseProxy,
+			DisableDB:           cfg.Proxy.DisableDatabaseProxy || useSeparatePostgresListener,
 			ID:                  teleport.Component(teleport.ComponentProxy, "tunnel", "web", process.id),
 		})
 		if err != nil {
@@ -2525,7 +2526,9 @@ func (process *TeleportProcess) setupProxyListeners() (*proxyListeners, error) {
 			return nil, trace.Wrap(err)
 		}
 		listeners.web = listeners.mux.TLS()
-		listeners.db.postgres = listeners.mux.DB()
+		if err := process.setPostgresListener(cfg, &listeners, useSeparatePostgresListener); err != nil {
+			return nil, trace.Wrap(err)
+		}
 		listeners.reverseTunnel = listeners.mux.SSH()
 		go listeners.mux.Serve()
 		return &listeners, nil
@@ -2540,7 +2543,7 @@ func (process *TeleportProcess) setupProxyListeners() (*proxyListeners, error) {
 			Listener:            listener,
 			DisableTLS:          false,
 			DisableSSH:          true,
-			DisableDB:           cfg.Proxy.DisableDatabaseProxy,
+			DisableDB:           cfg.Proxy.DisableDatabaseProxy || useSeparatePostgresListener,
 			ID:                  teleport.Component(teleport.ComponentProxy, "web", process.id),
 		})
 		if err != nil {
@@ -2548,7 +2551,9 @@ func (process *TeleportProcess) setupProxyListeners() (*proxyListeners, error) {
 			return nil, trace.Wrap(err)
 		}
 		listeners.web = listeners.mux.TLS()
-		listeners.db.postgres = listeners.mux.DB()
+		if err := process.setPostgresListener(cfg, &listeners, useSeparatePostgresListener); err != nil {
+			return nil, trace.Wrap(err)
+		}
 		listeners.reverseTunnel, err = process.importOrCreateListener(listenerProxyTunnel, cfg.Proxy.ReverseTunnelListenAddr.Addr)
 		if err != nil {
 			listener.Close()
@@ -2591,7 +2596,9 @@ func (process *TeleportProcess) setupProxyListeners() (*proxyListeners, error) {
 					return nil, trace.Wrap(err)
 				}
 				listeners.web = listeners.mux.TLS()
-				listeners.db.postgres = listeners.mux.DB()
+				if err := process.setPostgresListener(cfg, &listeners, useSeparatePostgresListener); err != nil {
+					return nil, trace.Wrap(err)
+				}
 				go listeners.mux.Serve()
 			} else {
 				process.log.Debug("Setup Proxy: TLS is disabled, multiplexing is off.")
@@ -2608,6 +2615,26 @@ func (process *TeleportProcess) setupProxyListeners() (*proxyListeners, error) {
 		}
 		return &listeners, nil
 	}
+}
+
+// setPostgresListener start Postgres proxy listener based on configuration settings. By default, Postgres service is
+// multiplexed on Teleport Proxy web port but if the postgres_listen_addr flag was provided (postgres_listen_addr) the
+// Postgres service runs on a separate port taken from the postgres_listen_addr configuration.
+func (process *TeleportProcess) setPostgresListener(cfg *Config, listeners *proxyListeners, useSeparateListener bool) error {
+	if !useSeparateListener {
+		// Postgres service is multiplexed on Proxy Web port.
+		listeners.db.postgres = listeners.mux.DB()
+		return nil
+	}
+	// If cfg.Proxy.PostgresAddr address was provided start Postgres service on separate listener without
+	// multiplexing it on webPort.
+	process.log.Debugf("Setup Proxy: Postgres proxy address: %v.", cfg.Proxy.PostgresAddr.Addr)
+	listener, err := process.importOrCreateListener(listenerProxyPostgres, cfg.Proxy.PostgresAddr.Addr)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	listeners.db.postgres = listener
+	return nil
 }
 
 func (process *TeleportProcess) initProxyEndpoint(conn *Connector) error {
@@ -3011,7 +3038,7 @@ func (process *TeleportProcess) initProxyEndpoint(conn *Connector) error {
 		if listeners.db.postgres != nil {
 			process.RegisterCriticalFunc("proxy.db.postgres", func() error {
 				log.Infof("Starting Postgres proxy server on %v.", cfg.Proxy.WebAddr.Addr)
-				if err := dbProxyServer.Serve(listeners.db.postgres); err != nil {
+				if err := dbProxyServer.ServePostgres(listeners.db.postgres); err != nil {
 					log.WithError(err).Warn("Postgres proxy server exited with error.")
 				}
 				return nil
@@ -3286,9 +3313,12 @@ func proxySettingsFromConfig(cfg *Config, proxySSHAddr utils.NetAddr) webclient.
 	if len(cfg.Proxy.Kube.PublicAddrs) > 0 {
 		proxySettings.Kube.PublicAddr = cfg.Proxy.Kube.PublicAddrs[0].String()
 	}
-	if len(cfg.Proxy.PostgresPublicAddrs) > 0 {
-		proxySettings.DB.PostgresPublicAddr = cfg.Proxy.PostgresPublicAddrs[0].String()
+	proxySettings.DB.PostgresPublicAddr = getPostgresPublicAddr(cfg)
+
+	if !cfg.Proxy.PostgresAddr.IsEmpty() {
+		proxySettings.DB.PostgresListenerAddr = cfg.Proxy.PostgresAddr.String()
 	}
+
 	if !cfg.Proxy.MySQLAddr.IsEmpty() {
 		proxySettings.DB.MySQLListenAddr = cfg.Proxy.MySQLAddr.String()
 	}
@@ -3302,6 +3332,31 @@ func proxySettingsFromConfig(cfg *Config, proxySSHAddr utils.NetAddr) webclient.
 		}
 	}
 	return proxySettings
+}
+
+// getPostgresPublicAddr returns the proxy PostgresPublicAddrs based if proxy postgres service
+// was configured on separate listener. For backward compatibility if PostgresPublicAddrs was not provided.
+// Proxy will reuse the PostgresPublicAddrs field to propagate postgres service address to legacy tsh clients.
+func getPostgresPublicAddr(cfg *Config) string {
+	if len(cfg.Proxy.PostgresPublicAddrs) > 0 {
+		return cfg.Proxy.PostgresPublicAddrs[0].String()
+	}
+
+	if len(cfg.Proxy.PostgresPublicAddrs) != 0 || cfg.Proxy.PostgresAddr.IsEmpty() {
+		return ""
+	}
+
+	// DELETE IN 9.0.0
+	// If the PostgresPublicAddrs address was not set propagate separate postgres service listener address
+	// to legacy tsh clients reusing PostgresPublicAddrs field.
+	var host string
+	if len(cfg.Proxy.PublicAddrs) > 0 {
+		// Get proxy host address from public address.
+		host = cfg.Proxy.PublicAddrs[0].Host()
+	} else {
+		host = cfg.Proxy.WebAddr.Host()
+	}
+	return fmt.Sprintf("%s:%d", host, cfg.Proxy.PostgresAddr.Port(defaults.PostgresListenPort))
 }
 
 func getProxyKubeAddress(cfg *Config) string {

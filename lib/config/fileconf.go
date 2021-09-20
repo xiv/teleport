@@ -1048,6 +1048,8 @@ type Proxy struct {
 	// MySQLPublicAddr is the hostport the proxy advertises for MySQL
 	// client connections.
 	MySQLPublicAddr apiutils.Strings `yaml:"mysql_public_addr,omitempty"`
+	// PostgresAddr is Postgres proxy listen address.
+	PostgresAddr string `yaml:"postgres_listen_addr,omitempty"`
 	// PostgresPublicAddr is the hostport the proxy advertises for Postgres
 	// client connections.
 	PostgresPublicAddr apiutils.Strings `yaml:"postgres_public_addr,omitempty"`

@@ -647,6 +647,13 @@ func applyProxyConfig(fc *FileConfig, cfg *service.Config) error {
 		}
 		cfg.Proxy.MySQLAddr = *addr
 	}
+	if fc.Proxy.PostgresAddr != "" {
+		addr, err := utils.ParseHostPortAddr(fc.Proxy.PostgresAddr, int(defaults.PostgresListenPort))
+		if err != nil {
+			return trace.Wrap(err)
+		}
+		cfg.Proxy.PostgresAddr = *addr
+	}
 
 	// This is the legacy format. Continue to support it forever, but ideally
 	// users now use the list format below.
@@ -768,17 +775,8 @@ func applyProxyConfig(fc *FileConfig, cfg *service.Config) error {
 		cfg.Proxy.TunnelPublicAddrs = addrs
 	}
 	if len(fc.Proxy.PostgresPublicAddr) != 0 {
-		// Postgres proxy is multiplexed on the web proxy port. If the port is
-		// not specified here explicitly, prefer defaults in the following
-		// order, depending on what's set:
-		//   1. Web proxy public port
-		//   2. Web proxy listen port
-		//   3. Web proxy default listen port
-		defaultPort := cfg.Proxy.WebAddr.Port(defaults.HTTPListenPort)
-		if len(cfg.Proxy.PublicAddrs) != 0 {
-			defaultPort = cfg.Proxy.PublicAddrs[0].Port(defaults.HTTPListenPort)
-		}
-		addrs, err := utils.AddrsFromStrings(fc.Proxy.PostgresPublicAddr, defaultPort)
+		postgresPort := getPostgresDefaultPort(fc, cfg)
+		addrs, err := utils.AddrsFromStrings(fc.Proxy.PostgresPublicAddr, postgresPort)
 		if err != nil {
 			return trace.Wrap(err)
 		}
@@ -803,6 +801,24 @@ func applyProxyConfig(fc *FileConfig, cfg *service.Config) error {
 	cfg.Proxy.ACME = *acme
 
 	return nil
+}
+
+func getPostgresDefaultPort(fc *FileConfig, cfg *service.Config) int {
+	if fc.Proxy.PostgresAddr != "" {
+		// If the roxy.PostgresAddr flag was provided return port
+		// from PostgresAddr address or default PostgresListenPort.
+		return cfg.Proxy.PostgresAddr.Port(defaults.PostgresListenPort)
+	}
+	// Postgres proxy is multiplexed on the web proxy port. If the port is
+	// not specified here explicitly, prefer defaults in the following
+	// order, depending on what's set:
+	//   1. Web proxy public port
+	//   2. Web proxy listen port
+	//   3. Web proxy default listen port
+	if len(cfg.Proxy.PublicAddrs) != 0 {
+		return cfg.Proxy.PublicAddrs[0].Port(defaults.HTTPListenPort)
+	}
+	return cfg.Proxy.WebAddr.Port(defaults.HTTPListenPort)
 }
 
 // applySSHConfig applies file configuration for the "ssh_service" section.
