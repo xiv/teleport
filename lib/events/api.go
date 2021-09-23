@@ -217,10 +217,14 @@ const (
 	//  - updating a user record
 	UpdatedBy = "updated_by"
 
+	// RecoveryTokenCreateEvent is emitted when a new recovery token is created.
+	RecoveryTokenCreateEvent = "recovery_token.create"
 	// ResetPasswordTokenCreateEvent is emitted when a new reset password token is created.
 	ResetPasswordTokenCreateEvent = "reset_password_token.create"
 	// ResetPasswordTokenTTL is TTL of reset password token.
 	ResetPasswordTokenTTL = "ttl"
+	// PrivilegeTokenCreateEvent is emitted when a new user privilege token is created.
+	PrivilegeTokenCreateEvent = "privilege_token.create"
 
 	// FieldName contains name, e.g. resource name, etc.
 	FieldName = "name"
@@ -353,6 +357,13 @@ const (
 	// session has been rejected due to exceeding a session control limit.
 	SessionRejectedEvent = "session.rejected"
 
+	// AppCreateEvent is emitted when an application resource is created.
+	AppCreateEvent = "app.create"
+	// AppUpdateEvent is emitted when an application resource is updated.
+	AppUpdateEvent = "app.update"
+	// AppDeleteEvent is emitted when an application resource is deleted.
+	AppDeleteEvent = "app.delete"
+
 	// AppSessionStartEvent is emitted when a user is issued an application certificate.
 	AppSessionStartEvent = "app.session.start"
 
@@ -363,6 +374,13 @@ const (
 
 	// AppSessionRequestEvent is an HTTP request and response.
 	AppSessionRequestEvent = "app.session.request"
+
+	// DatabaseCreateEvent is emitted when a database resource is created.
+	DatabaseCreateEvent = "db.create"
+	// DatabaseUpdateEvent is emitted when a database resource is updated.
+	DatabaseUpdateEvent = "db.update"
+	// DatabaseDeleteEvent is emitted when a database resource is deleted.
+	DatabaseDeleteEvent = "db.delete"
 
 	// DatabaseSessionStartEvent is emitted when a database client attempts
 	// to connect to a database.
@@ -401,6 +419,11 @@ const (
 	LockCreatedEvent = "lock.created"
 	// LockDeletedEvent fires when a lock is deleted.
 	LockDeletedEvent = "lock.deleted"
+
+	// RecoveryCodeGeneratedEvent is an event type for generating a user's recovery tokens.
+	RecoveryCodeGeneratedEvent = "recovery_code.generated"
+	// RecoveryCodeUsedEvent is an event type when a recovery token was used.
+	RecoveryCodeUsedEvent = "recovery_code.used"
 )
 
 const (

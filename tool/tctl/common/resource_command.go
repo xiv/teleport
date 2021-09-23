@@ -1,5 +1,5 @@
 /*
-Copyright 2015-2020 Gravitational, Inc.
+Copyright 2015-2021 Gravitational, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -98,6 +98,7 @@ func (rc *ResourceCommand) Initialize(app *kingpin.Application, config *service.
 		types.KindSessionRecordingConfig:  rc.createSessionRecordingConfig,
 		types.KindLock:                    rc.createLock,
 		types.KindNetworkRestrictions:     rc.createNetworkRestrictions,
+		types.KindApp:                     rc.createApp,
 		types.KindDatabase:                rc.createDatabase,
 	}
 	rc.config = config
@@ -266,7 +267,7 @@ func (rc *ResourceCommand) Create(client auth.ClientI) (err error) {
 		if !found {
 			// if we're trying to create an OIDC/SAML connector with the OSS version of tctl, return a specific error
 			if raw.Kind == "oidc" || raw.Kind == "saml" {
-				return trace.BadParameter("creating resources of type %q is only supported in Teleport Enterprise. https://goteleport.com/teleport/docs/enterprise/", raw.Kind)
+				return trace.BadParameter("creating resources of type %q is only supported in Teleport Enterprise. If you connecting to a Teleport Enterprise Cluster you must install the enterprise version of tctl. https://goteleport.com/teleport/docs/enterprise/", raw.Kind)
 			}
 			return trace.BadParameter("creating resources of type %q is not supported", raw.Kind)
 		}
@@ -543,6 +544,28 @@ func (rc *ResourceCommand) createNetworkRestrictions(client auth.ClientI, raw se
 	return nil
 }
 
+func (rc *ResourceCommand) createApp(client auth.ClientI, raw services.UnknownResource) error {
+	app, err := services.UnmarshalApp(raw.Raw)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	if err := client.CreateApp(context.Background(), app); err != nil {
+		if trace.IsAlreadyExists(err) {
+			if !rc.force {
+				return trace.AlreadyExists("application %q already exists", app.GetName())
+			}
+			if err := client.UpdateApp(context.Background(), app); err != nil {
+				return trace.Wrap(err)
+			}
+			fmt.Printf("application %q has been updated\n", app.GetName())
+			return nil
+		}
+		return trace.Wrap(err)
+	}
+	fmt.Printf("application %q has been created\n", app.GetName())
+	return nil
+}
+
 func (rc *ResourceCommand) createDatabase(client auth.ClientI, raw services.UnknownResource) error {
 	database, err := services.UnmarshalDatabase(raw.Raw)
 	if err != nil {
@@ -690,11 +713,26 @@ func (rc *ResourceCommand) Delete(client auth.ClientI) (err error) {
 			return trace.Wrap(err)
 		}
 		fmt.Printf("network restrictions have been reset to defaults (allow all)\n")
+	case types.KindApp:
+		if err = client.DeleteApp(ctx, rc.ref.Name); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("application %q has been deleted\n", rc.ref.Name)
 	case types.KindDatabase:
 		if err = client.DeleteDatabase(ctx, rc.ref.Name); err != nil {
 			return trace.Wrap(err)
 		}
 		fmt.Printf("database %q has been deleted\n", rc.ref.Name)
+	case types.KindWindowsDesktopService:
+		if err = client.DeleteWindowsDesktopService(ctx, rc.ref.Name); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("windows desktop service %q has been deleted\n", rc.ref.Name)
+	case types.KindWindowsDesktop:
+		if err = client.DeleteWindowsDesktop(ctx, rc.ref.Name); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("windows desktop %q has been deleted\n", rc.ref.Name)
 	default:
 		return trace.BadParameter("deleting resources of type %q is not supported", rc.ref.Kind)
 	}
@@ -1085,6 +1123,19 @@ func (rc *ResourceCommand) getCollection(client auth.ClientI) (ResourceCollectio
 			return nil, trace.Wrap(err)
 		}
 		return &netRestrictionsCollection{nr}, nil
+	case types.KindApp:
+		if rc.ref.Name == "" {
+			apps, err := client.GetApps(ctx)
+			if err != nil {
+				return nil, trace.Wrap(err)
+			}
+			return &appCollection{apps: apps}, nil
+		}
+		app, err := client.GetApp(ctx, rc.ref.Name)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &appCollection{apps: []types.Application{app}}, nil
 	case types.KindDatabase:
 		if rc.ref.Name == "" {
 			databases, err := client.GetDatabases(ctx)
@@ -1098,6 +1149,44 @@ func (rc *ResourceCommand) getCollection(client auth.ClientI) (ResourceCollectio
 			return nil, trace.Wrap(err)
 		}
 		return &databaseCollection{databases: []types.Database{database}}, nil
+	case types.KindWindowsDesktopService:
+		services, err := client.GetWindowsDesktopServices(ctx)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		if rc.ref.Name == "" {
+			return &windowsDesktopServiceCollection{services: services}, nil
+		}
+
+		var out []types.WindowsDesktopService
+		for _, service := range services {
+			if service.GetName() == rc.ref.Name {
+				out = append(out, service)
+			}
+		}
+		if len(out) == 0 {
+			return nil, trace.NotFound("Windows desktop service %q not found", rc.ref.Name)
+		}
+		return &windowsDesktopServiceCollection{services: out}, nil
+	case types.KindWindowsDesktop:
+		desktops, err := client.GetWindowsDesktops(ctx)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		if rc.ref.Name == "" {
+			return &windowsDesktopCollection{desktops: desktops}, nil
+		}
+
+		var out []types.WindowsDesktop
+		for _, desktop := range desktops {
+			if desktop.GetName() == rc.ref.Name {
+				out = append(out, desktop)
+			}
+		}
+		if len(out) == 0 {
+			return nil, trace.NotFound("Windows desktop %q not found", rc.ref.Name)
+		}
+		return &windowsDesktopCollection{desktops: out}, nil
 	}
 	return nil, trace.BadParameter("getting %q is not supported", rc.ref.String())
 }

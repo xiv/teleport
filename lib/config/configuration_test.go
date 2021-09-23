@@ -28,6 +28,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/gravitational/teleport/api/constants"
 	apidefaults "github.com/gravitational/teleport/api/defaults"
 	"github.com/gravitational/teleport/api/types"
@@ -46,7 +48,6 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/gravitational/trace"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/ssh"
 )
 
 type testConfigFiles struct {
@@ -133,6 +134,8 @@ func TestConfig(t *testing.T) {
 		require.Equal(t, "INFO", fc.Logger.Severity)
 		require.Equal(t, fc.Auth.ClusterName, ClusterName("cookie.localhost"))
 		require.Equal(t, fc.Auth.LicenseFile, "/tmp/license.pem")
+		require.Equal(t, fc.Proxy.PublicAddr, apiutils.Strings{"cookie.localhost:443"})
+		require.Equal(t, fc.Proxy.WebAddr, "0.0.0.0:443")
 
 		require.False(t, lib.IsInsecureDevMode())
 	})
@@ -234,6 +237,7 @@ func TestConfigReading(t *testing.T) {
 				Type: "bolt",
 			},
 			DataDir: "/path/to/data",
+			CAPin:   apiutils.Strings([]string{"rsa256:123", "rsa256:456"}),
 		},
 		Auth: Auth{
 			Service: Service{
@@ -264,7 +268,7 @@ func TestConfigReading(t *testing.T) {
 			KeyFile:  "/etc/teleport/proxy.key",
 			CertFile: "/etc/teleport/proxy.crt",
 			KeyPairs: []KeyPair{
-				KeyPair{
+				{
 					PrivateKey:  "/etc/teleport/proxy.key",
 					Certificate: "/etc/teleport/proxy.crt",
 				},
@@ -285,12 +289,19 @@ func TestConfigReading(t *testing.T) {
 				EnabledFlag: "yes",
 			},
 			Apps: []*App{
-				&App{
+				{
 					Name:          "foo",
 					URI:           "http://127.0.0.1:8080",
 					PublicAddr:    "foo.example.com",
 					StaticLabels:  Labels,
 					DynamicLabels: CommandLabels,
+				},
+			},
+			Selectors: []Selector{
+				{
+					MatchLabels: map[string]apiutils.Strings{
+						"*": {"*"},
+					},
 				},
 			},
 		},
@@ -307,6 +318,13 @@ func TestConfigReading(t *testing.T) {
 					DynamicLabels: CommandLabels,
 				},
 			},
+			Selectors: []Selector{
+				{
+					MatchLabels: map[string]apiutils.Strings{
+						"*": {"*"},
+					},
+				},
+			},
 		},
 		Metrics: Metrics{
 			Service: Service{
@@ -314,12 +332,20 @@ func TestConfigReading(t *testing.T) {
 				EnabledFlag:   "yes",
 			},
 			KeyPairs: []KeyPair{
-				KeyPair{
+				{
 					PrivateKey:  "/etc/teleport/proxy.key",
 					Certificate: "/etc/teleport/proxy.crt",
 				},
 			},
 			CACerts: []string{"/etc/teleport/ca.crt"},
+		},
+		WindowsDesktop: WindowsDesktopService{
+			Service: Service{
+				EnabledFlag:   "yes",
+				ListenAddress: "tcp://windows_desktop",
+			},
+			PublicAddr: apiutils.Strings([]string{"winsrv.example.com:3028", "no-port.winsrv.example.com"}),
+			Hosts:      apiutils.Strings([]string{"win.example.com:3389", "no-port.win.example.com"}),
 		},
 	}, cmp.AllowUnexported(Service{})))
 	require.True(t, conf.Auth.Configured())
@@ -336,6 +362,8 @@ func TestConfigReading(t *testing.T) {
 	require.True(t, conf.Databases.Enabled())
 	require.True(t, conf.Metrics.Configured())
 	require.True(t, conf.Metrics.Enabled())
+	require.True(t, conf.WindowsDesktop.Configured())
+	require.True(t, conf.WindowsDesktop.Enabled())
 
 	// good config from file
 	conf, err = ReadFromFile(testConfigs.configFileStatic)
@@ -589,6 +617,12 @@ SREzU8onbBsjMg9QDiSf5oJLKvd/Ren+zGY7
 			LockingMode:           constants.LockingModeBestEffort,
 		},
 	}))
+
+	require.Equal(t, "/usr/local/lib/example/path.so", cfg.Auth.KeyStore.Path)
+	require.Equal(t, "example_token", cfg.Auth.KeyStore.TokenLabel)
+	require.Equal(t, 1, *cfg.Auth.KeyStore.SlotNumber)
+	require.Equal(t, "example_pin", cfg.Auth.KeyStore.Pin)
+	require.Empty(t, cfg.CAPins)
 }
 
 // TestApplyConfigNoneEnabled makes sure that if a section is not enabled,
@@ -610,6 +644,7 @@ func TestApplyConfigNoneEnabled(t *testing.T) {
 	require.False(t, cfg.Apps.Enabled)
 	require.False(t, cfg.Databases.Enabled)
 	require.False(t, cfg.Metrics.Enabled)
+	require.False(t, cfg.WindowsDesktop.Enabled)
 	require.Empty(t, cfg.Proxy.PostgresPublicAddrs)
 	require.Empty(t, cfg.Proxy.MySQLPublicAddrs)
 }
@@ -921,6 +956,7 @@ func makeConfigFixture() string {
 	conf.Logger.Severity = "INFO"
 	conf.Logger.Format = LogFormat{Output: "text"}
 	conf.Storage.Type = "bolt"
+	conf.CAPin = []string{"rsa256:123", "rsa256:456"}
 
 	// auth service:
 	conf.Auth.EnabledFlag = "Yeah"
@@ -942,7 +978,7 @@ func makeConfigFixture() string {
 	conf.Proxy.KeyFile = "/etc/teleport/proxy.key"
 	conf.Proxy.CertFile = "/etc/teleport/proxy.crt"
 	conf.Proxy.KeyPairs = []KeyPair{
-		KeyPair{
+		{
 			PrivateKey:  "/etc/teleport/proxy.key",
 			Certificate: "/etc/teleport/proxy.crt",
 		},
@@ -964,12 +1000,17 @@ func makeConfigFixture() string {
 	// Application service.
 	conf.Apps.EnabledFlag = "yes"
 	conf.Apps.Apps = []*App{
-		&App{
+		{
 			Name:          "foo",
 			URI:           "http://127.0.0.1:8080",
 			PublicAddr:    "foo.example.com",
 			StaticLabels:  Labels,
 			DynamicLabels: CommandLabels,
+		},
+	}
+	conf.Apps.Selectors = []Selector{
+		{
+			MatchLabels: map[string]apiutils.Strings{"*": {"*"}},
 		},
 	}
 
@@ -984,16 +1025,30 @@ func makeConfigFixture() string {
 			DynamicLabels: CommandLabels,
 		},
 	}
+	conf.Databases.Selectors = []Selector{
+		{
+			MatchLabels: map[string]apiutils.Strings{"*": {"*"}},
+		},
+	}
 
 	// Metrics service.
 	conf.Metrics.EnabledFlag = "yes"
 	conf.Metrics.ListenAddress = "tcp://metrics"
 	conf.Metrics.CACerts = []string{"/etc/teleport/ca.crt"}
 	conf.Metrics.KeyPairs = []KeyPair{
-		KeyPair{
+		{
 			PrivateKey:  "/etc/teleport/proxy.key",
 			Certificate: "/etc/teleport/proxy.crt",
 		},
+	}
+
+	conf.WindowsDesktop = WindowsDesktopService{
+		Service: Service{
+			EnabledFlag:   "yes",
+			ListenAddress: "tcp://windows_desktop",
+		},
+		PublicAddr: apiutils.Strings([]string{"winsrv.example.com:3028", "no-port.winsrv.example.com"}),
+		Hosts:      apiutils.Strings([]string{"win.example.com:3389", "no-port.win.example.com"}),
 	}
 
 	return conf.DebugDumpToYAML()
@@ -1245,6 +1300,9 @@ app_service:
       name: foo
       public_addr: "foo.example.com"
       uri: "http://127.0.0.1:8080"
+  selectors:
+  - match_labels:
+      '*': '*'
 `,
 			inComment: "config is valid",
 			outError:  false,
@@ -1380,6 +1438,9 @@ func TestDatabaseConfig(t *testing.T) {
 			inConfigString: `
 db_service:
   enabled: true
+  selectors:
+  - match_labels:
+      '*': '*'
   databases:
   - name: foo
     protocol: postgres
@@ -1477,10 +1538,11 @@ func TestDatabaseCLIFlags(t *testing.T) {
 				Labels:           "env=test,hostname=[1h:hostname]",
 			},
 			outDatabase: service.Database{
-				Name:         "foo",
-				Protocol:     defaults.ProtocolPostgres,
-				URI:          "localhost:5432",
-				StaticLabels: map[string]string{"env": "test"},
+				Name:     "foo",
+				Protocol: defaults.ProtocolPostgres,
+				URI:      "localhost:5432",
+				StaticLabels: map[string]string{"env": "test",
+					types.OriginLabel: types.OriginConfigFile},
 				DynamicLabels: services.CommandLabels{
 					"hostname": &types.CommandLabelV2{
 						Period:  types.Duration(time.Hour),
@@ -1530,7 +1592,8 @@ func TestDatabaseCLIFlags(t *testing.T) {
 				AWS: service.DatabaseAWS{
 					Region: "us-east-1",
 				},
-				StaticLabels:  map[string]string{},
+				StaticLabels: map[string]string{
+					types.OriginLabel: types.OriginConfigFile},
 				DynamicLabels: services.CommandLabels{},
 			},
 		},
@@ -1553,7 +1616,8 @@ func TestDatabaseCLIFlags(t *testing.T) {
 						ClusterID: "redshift-cluster-1",
 					},
 				},
-				StaticLabels:  map[string]string{},
+				StaticLabels: map[string]string{
+					types.OriginLabel: types.OriginConfigFile},
 				DynamicLabels: services.CommandLabels{},
 			},
 		},
@@ -1576,7 +1640,8 @@ func TestDatabaseCLIFlags(t *testing.T) {
 					ProjectID:  "gcp-project-1",
 					InstanceID: "gcp-instance-1",
 				},
-				StaticLabels:  map[string]string{},
+				StaticLabels: map[string]string{
+					types.OriginLabel: types.OriginConfigFile},
 				DynamicLabels: services.CommandLabels{},
 			},
 		},

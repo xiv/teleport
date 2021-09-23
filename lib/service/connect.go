@@ -24,6 +24,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/gravitational/roundtrip"
+
 	apiclient "github.com/gravitational/teleport/api/client"
 	"github.com/gravitational/teleport/api/client/webclient"
 	"github.com/gravitational/teleport/api/constants"
@@ -358,7 +359,6 @@ func (process *TeleportProcess) firstTimeConnect(role types.SystemRole) (*Connec
 		}
 
 		identity, err = auth.Register(auth.RegisterParams{
-			DataDir:              process.Config.DataDir,
 			Token:                process.Config.Token,
 			ID:                   id,
 			Servers:              process.Config.AuthServers,
@@ -368,7 +368,7 @@ func (process *TeleportProcess) firstTimeConnect(role types.SystemRole) (*Connec
 			PublicTLSKey:         keyPair.PublicTLSKey,
 			PublicSSHKey:         keyPair.PublicSSHKey,
 			CipherSuites:         process.Config.CipherSuites,
-			CAPin:                process.Config.CAPin,
+			CAPins:               process.Config.CAPins,
 			CAPath:               filepath.Join(defaults.DataDir, defaults.CACertFile),
 			GetHostCredentials:   client.HostCredentials,
 			Clock:                process.Clock,
@@ -433,7 +433,7 @@ func (process *TeleportProcess) periodicSyncRotationState() error {
 	select {
 	case <-eventC:
 		process.log.Infof("The new service has started successfully. Starting syncing rotation status with period %v.", process.Config.PollingPeriod)
-	case <-process.ExitContext().Done():
+	case <-process.GracefulExitContext().Done():
 		return nil
 	}
 
@@ -452,7 +452,7 @@ func (process *TeleportProcess) periodicSyncRotationState() error {
 		process.log.Warningf("Sync rotation state cycle failed: %v, going to retry after ~%v.", err, defaults.HighResPollingPeriod)
 		select {
 		case <-periodic.Next():
-		case <-process.ExitContext().Done():
+		case <-process.GracefulExitContext().Done():
 			return nil
 		}
 	}
@@ -532,7 +532,7 @@ func (process *TeleportProcess) syncRotationStateCycle() error {
 			if status.needsReload {
 				return nil
 			}
-		case <-process.ExitContext().Done():
+		case <-process.GracefulExitContext().Done():
 			return nil
 		}
 	}
@@ -822,6 +822,7 @@ func (process *TeleportProcess) newClient(authServers []utils.NetAddr, identity 
 	}
 
 	logger.Debug("Attempting to discover reverse tunnel address.")
+
 	proxyAddr, err := process.findReverseTunnel(authServers)
 	if err != nil {
 		directErrLogger.Debug("Failed to connect to Auth Server directly.")
@@ -831,7 +832,11 @@ func (process *TeleportProcess) newClient(authServers []utils.NetAddr, identity 
 
 	logger = process.log.WithField("proxy-addr", proxyAddr)
 	logger.Debug("Attempting to connect to Auth Server through tunnel.")
-	tunnelClient, err := process.newClientThroughTunnel(proxyAddr, tlsConfig, identity.SSHClientConfig())
+	sshClientConfig, err := identity.SSHClientConfig(process.Config.FIPS)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	tunnelClient, err := process.newClientThroughTunnel(proxyAddr, tlsConfig, sshClientConfig)
 	if err != nil {
 		directErrLogger.Debug("Failed to connect to Auth Server directly.")
 		logger.WithError(err).Debug("Failed to connect to Auth Server through tunnel.")
@@ -863,6 +868,7 @@ func (process *TeleportProcess) newClientThroughTunnel(proxyAddr string, tlsConf
 		Dialer: &reversetunnel.TunnelAuthDialer{
 			ProxyAddr:    proxyAddr,
 			ClientConfig: sshConfig,
+			Log:          process.log,
 		},
 		Credentials: []apiclient.Credentials{
 			apiclient.LoadTLS(tlsConfig),

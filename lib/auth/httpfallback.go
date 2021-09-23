@@ -23,7 +23,9 @@ import (
 	"net/url"
 	"strconv"
 
+	"github.com/gravitational/teleport/api/client/proto"
 	"github.com/gravitational/teleport/api/types"
+	"github.com/gravitational/teleport/lib/auth/u2f"
 	"github.com/gravitational/teleport/lib/backend"
 	"github.com/gravitational/teleport/lib/services"
 	"github.com/gravitational/teleport/lib/utils"
@@ -747,4 +749,133 @@ func (c *Client) GetSessionRecordingConfig(ctx context.Context, opts ...services
 	}
 
 	return cfg.GetSessionRecordingConfig()
+}
+
+// DELETE IN 9.0.0, to remove fallback and grpc call is already defined in api/client/client.go
+//
+// ChangeUserAuthentication changes user password with a user reset token and starts a web session.
+// Returns recovery tokens for cloud users with second factors turned on.
+func (c *Client) ChangeUserAuthentication(ctx context.Context, req *proto.ChangeUserAuthenticationRequest) (*proto.ChangeUserAuthenticationResponse, error) {
+	switch resp, err := c.APIClient.ChangeUserAuthentication(ctx, req); {
+	// ChangeUserAuthentication available
+	case err == nil:
+		return resp, nil
+	// ChangeUserAuthentication errored
+	case !trace.IsNotImplemented(err):
+		return nil, trace.Wrap(err)
+	}
+
+	// Convert request back to fallback compatible object.
+	httpReq := ChangePasswordWithTokenRequest{
+		SecondFactorToken: req.GetNewMFARegisterResponse().GetTOTP().GetCode(),
+		TokenID:           req.GetTokenID(),
+		Password:          req.GetNewPassword(),
+	}
+
+	if req.NewMFARegisterResponse.GetU2F() != nil {
+		httpReq.U2FRegisterResponse = &u2f.RegisterChallengeResponse{
+			RegistrationData: req.NewMFARegisterResponse.GetU2F().GetRegistrationData(),
+			ClientData:       req.NewMFARegisterResponse.GetU2F().GetClientData(),
+		}
+	}
+
+	out, err := c.PostJSON(c.Endpoint("web", "password", "token"), httpReq)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	webSession, err := services.UnmarshalWebSession(out.Bytes())
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	sess, ok := webSession.(*types.WebSessionV2)
+	if !ok {
+		return nil, trace.BadParameter("unexpected WebSessionV2 type %T", sess)
+	}
+
+	return &proto.ChangeUserAuthenticationResponse{
+		WebSession: sess,
+	}, nil
+}
+
+// GenerateHostCerts generates new host certificates (signed by the host CA).
+// DELETE IN 9.0.0 (zmb3)
+func (c *Client) GenerateHostCerts(ctx context.Context, req *proto.HostCertsRequest) (*proto.Certs, error) {
+	switch certs, err := c.APIClient.GenerateHostCerts(ctx, req); {
+	case err == nil: // GRPC version is available and succeeded
+		return certs, nil
+	case !trace.IsNotImplemented(err): // GRPC version available but failed
+		return nil, trace.Wrap(err)
+	}
+
+	// fallback to legacy JSON API
+	out, err := c.PostJSON(c.Endpoint("server", "credentials"), legacyHostCertsRequest{
+		HostID:               req.HostID,
+		NodeName:             req.NodeName,
+		Roles:                types.SystemRoles{req.Role}, // old API requires a list of roles
+		AdditionalPrincipals: req.AdditionalPrincipals,
+		DNSNames:             req.DNSNames,
+		PublicTLSKey:         req.PublicTLSKey,
+		PublicSSHKey:         req.PublicSSHKey,
+		RemoteAddr:           req.RemoteAddr,
+		Rotation:             req.Rotation,
+	})
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	var certs proto.Certs
+	if err := json.Unmarshal(out.Bytes(), &certs); err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	return &certs, nil
+}
+
+// DELETE IN 9.0.0, to remove fallback and grpc call is already defined in api/client/client.go
+//
+// CreateAuthenticateChallenge creates and returns MFA challenges for a users registered MFA devices.
+func (c *Client) CreateAuthenticateChallenge(ctx context.Context, req *proto.CreateAuthenticateChallengeRequest) (*proto.MFAAuthenticateChallenge, error) {
+	switch resp, err := c.APIClient.CreateAuthenticateChallenge(ctx, req); {
+	case err == nil:
+		return resp, nil
+	case !trace.IsNotImplemented(err):
+		return nil, trace.Wrap(err)
+	}
+
+	// HTTP fallback for auth version <7.x
+	out, err := c.PostJSON(
+		c.Endpoint("u2f", "users", req.GetUserCredentials().GetUsername(), "sign"),
+		signInReq{
+			Password: string(req.GetUserCredentials().GetPassword()),
+		},
+	)
+
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	var jsonChal *MFAAuthenticateChallenge
+	if err := json.Unmarshal(out.Bytes(), &jsonChal); err != nil {
+		return nil, err
+	}
+
+	// Convert JSON back to proto.
+	// Webauthn is not handled here b/c the feature
+	// does not exist for auth version <7.x
+	protoChal := &proto.MFAAuthenticateChallenge{}
+
+	if jsonChal.TOTPChallenge {
+		protoChal.TOTP = &proto.TOTPChallenge{}
+	}
+
+	for _, u2fChal := range jsonChal.U2FChallenges {
+		protoChal.U2F = append(protoChal.U2F, &proto.U2FChallenge{
+			KeyHandle: u2fChal.KeyHandle,
+			Challenge: u2fChal.Challenge,
+			AppID:     u2fChal.AppID,
+		})
+	}
+
+	return protoChal, nil
 }
