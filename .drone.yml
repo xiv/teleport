@@ -16,6 +16,7 @@ trigger:
   event:
     include:
     - pull_request
+    - push
   repo:
     include:
     - gravitational/*
@@ -4411,6 +4412,6 @@ volumes:
       name: drone-s3-debrepo-pvc
 ---
 kind: signature
-hmac: fb46f96258947c1677199fc381dbbdbd9de73fac77ac7848589f46d3fbb17072
+hmac: abd02016ef9a5cd17562535454a10db29594b266f3768b9c04952c9fb0127ba6
 
 ...
