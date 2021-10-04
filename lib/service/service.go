@@ -2517,7 +2517,7 @@ func (process *TeleportProcess) setupProxyListeners() (*proxyListeners, error) {
 			Listener:            listener,
 			DisableTLS:          cfg.Proxy.DisableWebService,
 			DisableSSH:          cfg.Proxy.DisableReverseTunnel,
-			DisableDB:           cfg.Proxy.DisableDatabaseProxy || useSeparatePostgresListener,
+			DisablePostgres:     cfg.Proxy.DisableDatabaseProxy || useSeparatePostgresListener,
 			ID:                  teleport.Component(teleport.ComponentProxy, "tunnel", "web", process.id),
 		})
 		if err != nil {
@@ -2542,7 +2542,7 @@ func (process *TeleportProcess) setupProxyListeners() (*proxyListeners, error) {
 			Listener:            listener,
 			DisableTLS:          false,
 			DisableSSH:          true,
-			DisableDB:           cfg.Proxy.DisableDatabaseProxy || useSeparatePostgresListener,
+			DisablePostgres:     cfg.Proxy.DisableDatabaseProxy || useSeparatePostgresListener,
 			ID:                  teleport.Component(teleport.ComponentProxy, "web", process.id),
 		})
 		if err != nil {
@@ -2586,7 +2586,7 @@ func (process *TeleportProcess) setupProxyListeners() (*proxyListeners, error) {
 					Listener:            listener,
 					DisableTLS:          false, // Web service is enabled or we wouldn't have gotten here.
 					DisableSSH:          true,  // Reverse tunnel is on a separate listener created above.
-					DisableDB:           false, // Database proxy is enabled or we wouldn't have gotten here.
+					DisablePostgres:     false, // Database proxy is enabled or we wouldn't have gotten here.
 					ID:                  teleport.Component(teleport.ComponentProxy, "web", process.id),
 				})
 				if err != nil {
@@ -2620,6 +2620,9 @@ func (process *TeleportProcess) setupProxyListeners() (*proxyListeners, error) {
 // multiplexed on Teleport Proxy web port but if the postgres_listen_addr flag was provided (postgres_listen_addr) the
 // Postgres service runs on a separate port taken from the postgres_listen_addr configuration.
 func (process *TeleportProcess) setPostgresListener(cfg *Config, listeners *proxyListeners, useSeparateListener bool) error {
+	if cfg.Proxy.DisableDatabaseProxy {
+		return nil
+	}
 	if !useSeparateListener {
 		// Postgres service is multiplexed on Proxy Web port.
 		listeners.db.postgres = listeners.mux.DB()
