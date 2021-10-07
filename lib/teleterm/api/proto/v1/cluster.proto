@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+package teleport.terminal.v1;
+
+option go_package = "github.com/gravitational/teleport/lib/teleterm/v1";
+
+// Cluster describes cluster fields
+message Cluster {
+    // uri is the cluster resource URI
+    string uri = 1;
+    // name is the cluster name
+    string name = 2;
+    // connected indicates if connection to the cluster has been established
+    bool connected = 3;
+    // acl is the cluster access control list of the logged-in user
+    ClusterACL acl = 4;
+}
+
+// ResourceAccess describes access verbs
+message ResourceAccess {
+    // list determines "list" access
+    bool list = 1;
+    // read determines "read" access
+    bool read = 2;
+    // edit determines "edit" access
+    bool edit = 3;
+    // create determines "create" access
+    bool create = 4;
+    // delete determines "delete" access
+    bool delete = 5;
+}
+
+// ClusterACL is the access control list of the user
+message ClusterACL {
+    // sessions defines access to recorded sessions
+    ResourceAccess sessions = 1;
+    // auth_connectors defines access to auth.connectors
+    ResourceAccess auth_connectors = 2;
+    // Roles roles access to roles
+    ResourceAccess roles = 3;
+    // Users users access to users.
+    ResourceAccess users = 4;
+    // trusted_clusters defines access to trusted clusters
+    ResourceAccess trusted_clusters = 5;
+    // Events events access to audit logs
+    ResourceAccess events = 6;
+    // Tokens tokens access to tokens.
+    ResourceAccess tokens = 7;
+    // Servers servers access to servers.
+    ResourceAccess servers = 8;
+    // apps defines access to application servers
+    ResourceAccess apps = 9;
+    // dbs defines access to database servers.
+    ResourceAccess dbs = 10;
+    // kubeservers defines access to kubernetes servers.
+    ResourceAccess kubeservers = 11;
+    // SSH ssh_logins access to servers
+    repeated string ssh_logins = 12;
+    // access_requests defines access to access requests
+    ResourceAccess access_requests = 13;
+}
+
+// ClusterAuthSettings contains the form of authentication the auth server supports.
+message ClusterAuthSettings {
+    // Type is the type of authentication, can be either local or oidc.
+    string type = 1;
+    // SecondFactor is the type of second factor to use in authentication.
+    // Supported options are: off, otp, and u2f.
+    string second_factor = 2;
+    // U2F contains the Universal Second Factor settings needed for authentication.
+    AuthSettingsU2F u2f = 3;
+    // OIDC contains OIDC connector settings needed for authentication.
+    repeated AuthProvider auth_providers = 4;
+    // HasMessageOfTheDay is a flag indicating that the cluster has MOTD
+    // banner text that must be retrieved, displayed and acknowledged by
+    // the user.
+    bool has_message_of_the_day = 5;
+}
+
+// SSOSettings is SSO provider settings
+message AuthProvider {
+    // Type is the auth provider type (github|oidc|etc)
+    string type = 1;
+    // Name is the internal name of the connector.
+    string name = 2;
+    // Display is the display name for the connector.
+    string display = 3;
+}
+
+// U2FSettings contains the AppID for Universal Second Factor.
+message AuthSettingsU2F {
+    // AppID is the U2F AppID.
+    string app_id = 1;
+}

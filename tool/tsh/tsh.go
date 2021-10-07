@@ -1780,6 +1780,7 @@ func makeClient(cf *CLIConf, useProfileLogin bool) (*client.TeleportClient, erro
 			fmt.Printf("WARNING: Failed to load tsh profile for %q: %v\n", cf.Proxy, err)
 		}
 	}
+
 	// 3: override with the CLI flags
 	if cf.Namespace != "" {
 		c.Namespace = cf.Namespace
@@ -1787,6 +1788,7 @@ func makeClient(cf *CLIConf, useProfileLogin bool) (*client.TeleportClient, erro
 	if cf.Username != "" {
 		c.Username = cf.Username
 	}
+
 	// if proxy is set, and proxy is not equal to profile's
 	// loaded addresses, override the values
 	if err := setClientWebProxyAddr(cf, c); err != nil {
@@ -1885,6 +1887,7 @@ func makeClient(cf *CLIConf, useProfileLogin bool) (*client.TeleportClient, erro
 	}
 
 	tc, err := client.NewClient(c)
+
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+package teleport.terminal.v1;
+
+option go_package = "github.com/gravitational/teleport/lib/teleterm/v1";
+
+import "google/protobuf/empty.proto";
+import "v1/cluster.proto";
+import "v1/cluster_login_challenge.proto";
+import "v1/database.proto";
+import "v1/gateway.proto";
+import "v1/server.proto";
+
+// Note: following Google API Style guide (mostly)
+// https://cloud.google.com/apis/design/.
+
+service TerminalService {
+    // CreateCluster
+    rpc CreateCluster(CreateClusterRequest) returns (Cluster);
+    // ListClusters
+    rpc ListClusters(ListClustersRequest) returns (ListClustersResponse);
+    // GetClusterAuthSettings
+    rpc GetClusterAuthSettings(GetClusterAuthSettingsRequest) returns (ClusterAuthSettings);
+    // CreateClusterLoginChallenge
+    rpc CreateClusterLoginChallenge(CreateClusterLoginChallengeRequest)
+        returns (ClusterLoginChallenge);
+    // SolveClusterLoginChallenge
+    rpc SolveClusterLoginChallenge(SolveClusterLoginChallengeRequest)
+        returns (SolveClusterLoginChallengeResponse);
+    // ListDatabases
+    rpc ListDatabases(ListDatabasesRequest) returns (ListDatabasesResponse);
+    // CreateGateway
+    rpc CreateGateway(CreateGatewayRequest) returns (Gateway);
+    // ListGateways
+    rpc ListGateways(ListGatewaysRequest) returns (ListGatewaysResponse);
+    // DeleteGateway
+    rpc DeleteGateway(DeleteGatewayRequest) returns (EmptyResponse);
+    // ListServers
+    rpc ListServers(ListServersRequest) returns (ListServersResponse);
+}
+
+message CreateClusterRequest {
+    // name is the cluster name
+    string name = 1;
+}
+
+message ListClustersRequest {}
+
+message ListClustersResponse { repeated Cluster clusters = 1; }
+
+message CreateClusterLoginChallengeRequest {
+    string cluster_id = 1;
+
+    // Login and password are currently required to generate Teleport challenges.
+    string login = 2;
+    string password = 3;
+}
+
+message SolveClusterLoginChallengeRequest {
+    string cluster_id = 1;
+    string challenge_id = 2;
+    SolvedClusterLoginChallenge solved_challenge = 3;
+}
+
+message SolveClusterLoginChallengeResponse {
+    // TODO(codingllama): Relay whatever we need for the UI.
+}
+
+message ListDatabasesRequest {
+    // cluster_uri is the cluster uri
+    string cluster_uri = 3;
+}
+
+message ListDatabasesResponse { repeated Database databases = 1; }
+
+message CreateGatewayRequest {
+    string target_uri = 1;
+    string port = 2;
+}
+
+message ListGatewaysRequest { repeated string cluster_ids = 3; }
+
+message ListGatewaysResponse { repeated Gateway gateways = 1; }
+
+message DeleteGatewayRequest { string gateway_uri = 1; }
+
+message ListServersRequest { string cluster_uri = 1; }
+
+message ListServersResponse { repeated Server servers = 1; }
+
+// GetClusterAuthSettingsRequest is the get cluster auth settings request
+message GetClusterAuthSettingsRequest {
+    // Name is the cluster name
+    string name = 1;
+}
+
+message EmptyResponse {}
