@@ -41,7 +41,7 @@ func (c *Config) CheckAndSetDefaults() error {
 	}
 
 	if c.Log == nil {
-		c.Log = logrus.NewEntry(logrus.StandardLogger())
+		c.Log = logrus.NewEntry(logrus.StandardLogger()).WithField(trace.Component, "api_server")
 	}
 
 	return nil

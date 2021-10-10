@@ -40,12 +40,6 @@ type Database struct {
 
 // GetDatabase returns a database
 func (c *Cluster) GetDatabase(ctx context.Context, dbURI string) (*Database, error) {
-	proxyClient, err := c.clusterClient.ConnectToProxy(ctx)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	defer proxyClient.Close()
-
 	dbs, err := c.GetDatabases(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)

@@ -15,6 +15,7 @@
 package teleterm
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/gravitational/trace"
@@ -45,4 +46,9 @@ func (c *Config) CheckAndSetDefaults() error {
 	}
 
 	return nil
+}
+
+// String returns the config string representation
+func (c *Config) String() string {
+	return fmt.Sprintf("HomeDir=%+v, Addr=%s, Insecure=%+v", c.HomeDir, c.Addr, c.InsecureSkipVerify)
 }

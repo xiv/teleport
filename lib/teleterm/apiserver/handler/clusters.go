@@ -45,6 +45,16 @@ func (s *Handler) CreateCluster(ctx context.Context, req *api.CreateClusterReque
 	return newAPICluster(cluster), nil
 }
 
+// GetCluster returns a cluster
+func (s *Handler) GetCluster(ctx context.Context, req *api.GetClusterRequest) (*api.Cluster, error) {
+	cluster, err := s.DaemonService.GetCluster(req.ClusterUri)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	return newAPICluster(cluster), nil
+}
+
 // GetClusterAuthSettings returns cluster auth preferences
 func (s *Handler) GetClusterAuthSettings(ctx context.Context, req *api.GetClusterAuthSettingsRequest) (*api.ClusterAuthSettings, error) {
 	cluster, err := s.DaemonService.GetCluster(req.Name)

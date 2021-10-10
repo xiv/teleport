@@ -30,24 +30,6 @@ func New(cfg Config) (apiServer *APIServer, err error) {
 		return nil, trace.Wrap(err)
 	}
 
-	ls, err := newListener(cfg.HostAddr)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-
-	defer func() {
-		if err != nil {
-			ls.Close()
-		}
-	}()
-
-	grpcServer := grpc.NewServer(
-		grpc.Creds(nil),
-		grpc.ChainUnaryInterceptor(
-			withErrorHandling(cfg.Log),
-		),
-	)
-
 	serviceHandler, err := handler.New(
 		handler.Config{
 			DaemonService: cfg.Daemon,
@@ -56,6 +38,18 @@ func New(cfg Config) (apiServer *APIServer, err error) {
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
+
+	ls, err := newListener(cfg.HostAddr)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	grpcServer := grpc.NewServer(
+		grpc.Creds(nil),
+		grpc.ChainUnaryInterceptor(
+			withErrorHandling(cfg.Log),
+		),
+	)
 
 	api.RegisterTerminalServiceServer(grpcServer, serviceHandler)
 

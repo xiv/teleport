@@ -88,8 +88,6 @@ func (c *Cluster) LocalLogin(ctx context.Context, user, password, otpToken strin
 		return trace.Wrap(err)
 	}
 
-	c.clusterClient.Username = user
-
 	response, err := client.SSHAgentLogin(ctx, client.SSHLoginDirect{
 		SSHLogin: client.SSHLogin{
 			ProxyAddr:         c.clusterClient.WebProxyAddr,
@@ -97,10 +95,9 @@ func (c *Cluster) LocalLogin(ctx context.Context, user, password, otpToken strin
 			TTL:               c.clusterClient.KeyTTL,
 			Insecure:          c.clusterClient.InsecureSkipVerify,
 			Compatibility:     c.clusterClient.CertificateFormat,
-			RouteToCluster:    c.clusterClient.Host,
 			KubernetesCluster: c.clusterClient.KubernetesCluster,
 		},
-		User:     c.clusterClient.Username,
+		User:     user,
 		Password: password,
 		OTPToken: otpToken,
 	})
@@ -112,20 +109,20 @@ func (c *Cluster) LocalLogin(ctx context.Context, user, password, otpToken strin
 		return trace.Wrap(err)
 	}
 
-	return trace.Wrap(err)
+	return nil
 }
 
 func (c *Cluster) processAuthResponse(ctx context.Context, key *client.Key, response *auth.SSHLoginResponse) error {
-	// extract the new certificate out of the response
-	key.Cert = response.Cert
-	key.TLSCert = response.TLSCert
-
 	// Check that a host certificate for at least one cluster was returned.
 	if len(response.HostSigners) == 0 {
 		return trace.BadParameter("bad response from the server: expected at least one certificate, got 0")
 	}
 
+	// extract the new certificate out of the response
+	key.Cert = response.Cert
+	key.TLSCert = response.TLSCert
 	key.TrustedCA = response.HostSigners
+	key.Username = response.Username
 
 	if c.clusterClient.KubernetesCluster != "" {
 		key.KubeTLSCerts[c.clusterClient.KubernetesCluster] = response.TLSCert
@@ -141,6 +138,10 @@ func (c *Cluster) processAuthResponse(ctx context.Context, key *client.Key, resp
 		key.ClusterName = rootClusterName
 		c.clusterClient.SiteName = rootClusterName
 	}
+
+	// update username before updating the profile
+	c.clusterClient.LocalAgent().UpdateUsername(response.Username)
+	c.clusterClient.Username = response.Username
 
 	if err := c.clusterClient.ActivateKey(ctx, key); err != nil {
 		return trace.Wrap(err)

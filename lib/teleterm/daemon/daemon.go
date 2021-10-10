@@ -18,13 +18,14 @@ import (
 	"context"
 	"net"
 
-	"github.com/gravitational/trace"
-	"github.com/jonboulle/clockwork"
-
-	"github.com/gravitational/teleport/lib/teleterm/api/uri"
-
 	"github.com/gravitational/teleport/api/profile"
 	"github.com/gravitational/teleport/lib/client"
+	"github.com/gravitational/teleport/lib/teleterm/api/uri"
+
+	"github.com/gravitational/trace"
+
+	"github.com/jonboulle/clockwork"
+	"github.com/sirupsen/logrus"
 )
 
 // Config is the cluster service config
@@ -35,6 +36,8 @@ type Config struct {
 	Clock clockwork.Clock
 	// InsecureSkipVerify is an option to skip HTTPS cert check
 	InsecureSkipVerify bool
+	// Log is a component logger
+	Log *logrus.Entry
 }
 
 // CheckAndSetDefaults checks the configuration for its validity and sets default values if needed
@@ -45,6 +48,10 @@ func (c *Config) CheckAndSetDefaults() error {
 
 	if c.Clock == nil {
 		c.Clock = clockwork.NewRealClock()
+	}
+
+	if c.Log == nil {
+		c.Log = logrus.NewEntry(logrus.StandardLogger()).WithField(trace.Component, "daemon")
 	}
 
 	return nil
@@ -72,10 +79,15 @@ func (s *Service) GetClusters() []*Cluster {
 
 // CreateCluster creates a new cluster
 func (s *Service) CreateCluster(ctx context.Context, webProxyAddress string) (*Cluster, error) {
-	name := parseClusterName(webProxyAddress)
-	for _, cluster := range s.clusters {
-		if cluster.URI == uri.Cluster(name).String() {
-			return nil, trace.BadParameter("cluster %v already exists", name)
+	profiles, err := profile.ListProfileNames(s.Dir)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	clusterName := parseClusterName(webProxyAddress)
+	for _, pname := range profiles {
+		if pname == clusterName {
+			return nil, trace.BadParameter("cluster %v already exists", clusterName)
 		}
 	}
 
@@ -99,8 +111,8 @@ func (s *Service) GetCluster(clusterURI string) (*Cluster, error) {
 	return nil, trace.NotFound("cluster is not found: %v", clusterURI)
 }
 
-// LoadClusters loads clusters from saved profiles
-func (s *Service) LoadClusters() error {
+// Init loads clusters from saved profiles
+func (s *Service) Init() error {
 	pfNames, err := profile.ListProfileNames(s.Dir)
 	if err != nil {
 		return trace.Wrap(err)
@@ -181,6 +193,10 @@ func (s *Service) newClusterFromProfile(name string) (*Cluster, error) {
 
 	// load profile status if key exists
 	_, err = clt.LocalAgent().GetKey(name)
+	if err != nil {
+		s.Log.WithError(err).Infof("Unable to load the keys for cluster %v.", name)
+	}
+
 	if err == nil && cfg.Username != "" {
 		status, err = client.StatusFromFile(s.Dir, name)
 		if err != nil {
@@ -197,10 +213,10 @@ func (s *Service) newClusterFromProfile(name string) (*Cluster, error) {
 
 	return &Cluster{
 		URI:           uri.Cluster(name).String(),
-		Name:          name,
+		Name:          clt.SiteName,
+		clusterClient: clt,
 		dir:           s.Dir,
 		clock:         s.Clock,
-		clusterClient: clt,
 		status:        *status,
 	}, nil
 }
@@ -215,7 +231,6 @@ func (s *Service) newCluster(dir, webProxyAddress string) (*Cluster, error) {
 		return nil, trace.BadParameter("cluster directory is missing")
 	}
 
-	clusterName := parseClusterName(webProxyAddress)
 	cfg := client.MakeDefaultConfig()
 	cfg.WebProxyAddr = webProxyAddress
 	cfg.HomePath = s.Dir
@@ -231,9 +246,7 @@ func (s *Service) newCluster(dir, webProxyAddress string) (*Cluster, error) {
 		return nil, trace.Wrap(err)
 	}
 
-	status := client.ProfileStatus{
-		Name: clusterName,
-	}
+	clusterName := parseClusterName(webProxyAddress)
 
 	return &Cluster{
 		URI:           uri.Cluster(clusterName).String(),
@@ -241,7 +254,6 @@ func (s *Service) newCluster(dir, webProxyAddress string) (*Cluster, error) {
 		dir:           s.Dir,
 		clusterClient: clusterClient,
 		clock:         s.Clock,
-		status:        status,
 	}, nil
 }
 

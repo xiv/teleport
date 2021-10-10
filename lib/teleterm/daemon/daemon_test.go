@@ -15,7 +15,6 @@
 package daemon_test
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -25,7 +24,7 @@ import (
 )
 
 const (
-	profileDir = "/home/alexey/go/src/github.com/gravitational/_terminal"
+	profileDir = "/tmp/tshd/data"
 )
 
 func TestStart(t *testing.T) {
@@ -36,20 +35,22 @@ func TestStart(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	err = d.LoadClusters()
+	err = d.Init()
 	require.NoError(t, err)
 
 	//fmt.Printf("\n\n\n ALL CLUSTER: %+v", d.GetClusters())
 
 	//cluster, err := d.CreateCluster(context.TODO(), "localhost:4080")
-	//fmt.Printf("CLUSTER: %+v", cluster)
+	fmt.Printf("CLUSTER: %+v", d.GetClusters()[0].Connected())
+	require.Error(t, err)
+
+	//cluster, err := d.GetCluster("/clusters/localhost")
+	//servers, err := cluster.GetServers(context.TODO())
+	//fmt.Print("AAAAAAAAAAAAAAAAAAAAAA:", servers)
 	//require.NoError(t, err)
 
-	cluster, err := d.GetCluster("/clusters/localhost")
-	require.NoError(t, err)
-
-	err = cluster.LocalLogin(context.TODO(), "papa", "123123", "")
-	require.NoError(t, err)
+	//err = cluster.LocalLogin(context.TODO(), "papa", "123123", "")
+	//require.NoError(t, err)
 
 	//cluster.get
 
@@ -64,20 +65,20 @@ func TestStart(t *testing.T) {
 	//fmt.Print("AAAAAAAAAAAAAAAAAAAAAA:", roles)
 	//require.Error(t, err)
 
-	fmt.Printf("AAAAAAAAAAAAAAAAAAAAAAAA: %+v \n", d.GetClusters()[0])
+	//fmt.Printf("AAAAAAAAAAAAAAAAAAAAAAAA: %+v \n", d.GetClusters()[0])
 
-	dbs, err := cluster.GetDatabases(context.TODO())
+	//dbs, err := cluster.GetDatabases(context.TODO())
 	//fmt.Printf("CLUSTER OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO: %+v", dbs[0].URI)
-	require.NoError(t, err)
+	//require.NoError(t, err)
 
-	gateway, err := cluster.CreateGateway(context.TODO(), dbs[0].URI, "1223", "")
-	fmt.Printf("\n\n MAMAMAMAMACLUSTER: %+v", gateway)
-	require.NoError(t, err)
+	// gateway, err := cluster.CreateGateway(context.TODO(), dbs[0].URI, "1223", "")
+	// fmt.Printf("\n\n MAMAMAMAMACLUSTER: %+v", gateway)
+	// require.NoError(t, err)
 
 	//fmt.Print("\n\n\nZOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOPA", uri.Parse(gateway.URI).Cluster())
-	err = d.RemoveGateway(context.TODO(), gateway.URI)
-	fmt.Printf("CLUSTER: %+v", gateway)
-	require.NoError(t, err)
+	// err = d.RemoveGateway(context.TODO(), gateway.URI)
+	// fmt.Printf("CLUSTER: %+v", gateway)
+	// require.NoError(t, err)
 
 	//gateways := cluster.GetGateways()
 	//require.Len(t, gateways, 0)
@@ -94,7 +95,7 @@ func FTestS(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	err = d.LoadClusters()
+	err = d.Init()
 	require.NoError(t, err)
 	//
 	//err = d.CreateCluster(context.TODO(), "test.sh")

@@ -26,10 +26,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const (
-	profileDir = "/home/alexey/go/src/github.com/gravitational/_terminal"
-)
-
 // Start creates and starts a Teleport Terminal service.
 func Start(ctx context.Context, cfg Config) error {
 	if err := cfg.CheckAndSetDefaults(); err != nil {
@@ -37,10 +33,14 @@ func Start(ctx context.Context, cfg Config) error {
 	}
 
 	daemonService, err := daemon.New(daemon.Config{
-		Dir:                profileDir,
+		Dir:                cfg.HomeDir,
 		InsecureSkipVerify: cfg.InsecureSkipVerify,
 	})
 	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	if err := daemonService.Init(); err != nil {
 		return trace.Wrap(err)
 	}
 
@@ -53,12 +53,12 @@ func Start(ctx context.Context, cfg Config) error {
 	}
 
 	serverAPIWait := make(chan error)
-
 	go func() {
 		err := apiServier.Serve()
 		serverAPIWait <- err
 	}()
 
+	log.Infof("tshd config: %v", cfg.String())
 	log.Infof("tshd is listening on %v", cfg.Addr)
 
 	// Wait for shutdown signals
@@ -77,7 +77,7 @@ func Start(ctx context.Context, cfg Config) error {
 	errAPI := <-serverAPIWait
 
 	if errAPI != nil {
-		return trace.Wrap(errAPI, "shutting down due to ServeAPI error")
+		return trace.Wrap(errAPI, "shutting down due to API Server error")
 	}
 
 	return nil

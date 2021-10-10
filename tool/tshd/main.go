@@ -47,16 +47,17 @@ func main() {
 func configureLogging() {
 	switch *logFormat {
 	case "": // OK, use defaults
+		log.SetFormatter(&trace.TextFormatter{})
 	case "json":
-		log.SetFormatter(&log.JSONFormatter{})
+		log.SetFormatter(&trace.JSONFormatter{})
 	case "text":
-		log.SetFormatter(&log.TextFormatter{})
+		log.SetFormatter(&trace.TextFormatter{})
 	default:
 		log.Warnf("Invalid log_format flag: %q", *logFormat)
 	}
 	if ll := *logLevel; ll != "" {
 		switch level, err := log.ParseLevel(ll); {
-		case err == nil:
+		case err != nil:
 			log.WithError(err).Warn("Invalid -log_level flag")
 		default:
 			log.SetLevel(level)

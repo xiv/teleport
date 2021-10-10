@@ -143,7 +143,10 @@ RUN (curl -o /tmp/nodejs.tar.xz -L ${NODE_URL} && tar -xJf /tmp/nodejs.tar.xz -C
 
 # Install js proto tools
 RUN (npm install --global grpc-tools@1.11.2)
-RUN (npm install --global ts-protoc-gen@0.15.0)
+#RUN (npm install --global ts-protoc-gen@0.15.0)
+
+RUN (npm install --global grpc_tools_node_protoc_ts@5.0.1)
+
 RUN go install github.com/golang/protobuf/protoc-gen-go@v1.4.3
 
 ENV PROTO_INCLUDE "/usr/local/include":"${GOPATH}/src":"${GOPATH}/src/github.com/gogo/protobuf/protobuf":"${GOGOPROTO_ROOT}":"${GOGOPROTO_ROOT}/protobuf":"${GOPATH}/src/github.com/gravitational/teleport/lib/services"

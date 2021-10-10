@@ -15,11 +15,14 @@
 package handler
 
 import (
-	"context"
-
-	api "github.com/gravitational/teleport/lib/teleterm/api/protogen/golang/v1"
 	"github.com/gravitational/teleport/lib/teleterm/daemon"
 )
+
+func New(cfg Config) (*Handler, error) {
+	return &Handler{
+		cfg,
+	}, nil
+}
 
 // Config is the terminal service
 type Config struct {
@@ -31,18 +34,4 @@ type Config struct {
 type Handler struct {
 	// Config is the service config
 	Config
-}
-
-func New(cfg Config) (*Handler, error) {
-	return &Handler{
-		cfg,
-	}, nil
-}
-
-func (s *Handler) CreateClusterLoginChallenge(context.Context, *api.CreateClusterLoginChallengeRequest) (*api.ClusterLoginChallenge, error) {
-	return nil, nil
-}
-
-func (s *Handler) SolveClusterLoginChallenge(context.Context, *api.SolveClusterLoginChallengeRequest) (*api.SolveClusterLoginChallengeResponse, error) {
-	return nil, nil
 }
