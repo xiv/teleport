@@ -783,7 +783,7 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 				},
 				ConnectionMetadata: apievents.ConnectionMetadata{
 					RemoteAddr: req.RemoteAddr,
-					Protocol:   events.EventProtocolKube,
+					Protocol:   events.EventProtocolRDP,
 				},
 				ServerMetadata: apievents.ServerMetadata{
 					ServerNamespace: f.cfg.Namespace,
