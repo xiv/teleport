@@ -247,7 +247,6 @@ func (m *Mux) detectAndForward(conn net.Conn) {
 			return
 		}
 		m.Debugf("RemoteAddr from mux ssh: %v", connWrapper.RemoteAddr().String())
-		m.Debugf("RemoteAddr proxyLineSource: %v", connWrapper.proxyLine.Source)
 		select {
 		case m.sshListener.connC <- connWrapper:
 		case <-m.context.Done():
