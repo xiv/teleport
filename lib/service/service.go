@@ -2488,10 +2488,26 @@ func (process *TeleportProcess) setupProxyListeners() (*proxyListeners, error) {
 	var err error
 	var listeners proxyListeners
 
-	listeners.ssh, err = process.importOrCreateListener(listenerProxySSH, cfg.Proxy.SSHAddr.Addr)
+	sshListener, err := process.importOrCreateListener(listenerProxySSH, cfg.Proxy.SSHAddr.Addr)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
+
+	sshMux, err := multiplexer.New(multiplexer.Config{
+		EnableProxyProtocol: cfg.Proxy.EnableProxyProtocol,
+		Listener:            sshListener,
+		DisableTLS:          true,
+		DisableSSH:          false,
+		DisableDB:           true,
+		ID:                  teleport.Component(teleport.ComponentProxy, "ssh", process.id),
+	})
+	if err != nil {
+		sshMux.Close()
+		return nil, trace.Wrap(err)
+	}
+
+	go sshMux.Serve()
+	listeners.ssh = sshMux.SSH()
 
 	if cfg.Proxy.Kube.Enabled && !cfg.Proxy.Kube.ListenAddr.IsEmpty() {
 		process.log.Debugf("Setup Proxy: turning on Kubernetes proxy.")
