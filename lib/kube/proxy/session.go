@@ -40,3 +40,9 @@ func NewSession() *Session {
 		uuid: uuid.New(),
 	}
 }
+
+func (s *Session) StartInteractive() {
+	s.mu.Lock()
+	s.state = SessionRunning
+	s.mu.Unlock()
+}
