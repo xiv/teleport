@@ -702,6 +702,17 @@ func (f *Forwarder) newStreamer(ctx *authContext) (events.Streamer, error) {
 	return events.NewTeeStreamer(fileStreamer, f.cfg.StreamEmitter), nil
 }
 
+func trimLeftChars(s string, n int) string {
+	m := 0
+	for i := range s {
+		if m >= n {
+			return s[i:]
+		}
+		m++
+	}
+	return s[:0]
+}
+
 // exec forwards all exec requests to the target server, captures
 // all output from the session
 func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Request, p httprouter.Params) (resp interface{}, err error) {
@@ -711,6 +722,16 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 			f.log.WithError(err).Debug("Exec request failed")
 		}
 	}()
+
+	if strings.HasPrefix(p.ByName("podName"), "uuid") {
+		uuid := trimLeftChars(p.ByName("podName"), 4)
+		f.mu.Lock()
+		session := f.sessions[uuid]
+		f.mu.Unlock()
+		session.WaitOnStart(ctx)
+
+		// TODO(joel): attach multiplexer here
+	}
 
 
 	session := NewSession(ctx)
