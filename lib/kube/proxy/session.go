@@ -32,17 +32,51 @@ type Session struct {
 	mu sync.Mutex
 	state SessionState
 	uuid string
+	owner *authContext
+	participants []*authContext
+	notifier chan struct{}
 }
 
-func NewSession() *Session {
+func NewSession(ctx *authContext) *Session {
+	participants := make([]*authContext, 0)
+	participants = append(participants, ctx)
+
 	return &Session {
 		state: SessionPending,
 		uuid: uuid.New(),
+		owner: ctx,
+		participants: participants,
+		notifier: make(chan struct{}),
 	}
 }
 
-func (s *Session) StartInteractive() {
+func (s *Session) WaitOnStart(ctx *authContext) {
 	s.mu.Lock()
-	s.state = SessionRunning
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	s.participants = append(s.participants, ctx)
+
+	if s.state == SessionRunning {
+		return
+	}
+
+	if sessionClearanceAcquired(s.participants) {
+		s.state = SessionRunning
+		close(s.notifier)
+	} else {
+		_, _ = <- s.notifier
+	}
+}
+
+func sessionClearanceAcquired(participants []*authContext) bool {
+	for _, participant := range participants {
+		roles := participant.User.GetRoles()
+
+		for _, role := range roles {
+			if role == "admin" {
+				return true
+			}
+		}
+	}
+
+	return false
 }

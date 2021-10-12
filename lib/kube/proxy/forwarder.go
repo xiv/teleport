@@ -713,10 +713,12 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 	}()
 
 
-	session := NewSession()
+	session := NewSession(ctx)
 	f.mu.Lock()
 	f.sessions[session.uuid] = session
 	f.mu.Unlock()
+	session.WaitOnStart(ctx)
+
 	sess, err := f.newClusterSession(*ctx)
 	if err != nil {
 		// This error goes to kubernetes client and is not visible in the logs
