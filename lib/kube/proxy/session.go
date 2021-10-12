@@ -16,7 +16,10 @@ limitations under the License.
 
 package proxy
 
-import "github.com/pborman/uuid"
+import (
+	"github.com/pborman/uuid"
+	"sync"
+)
 
 type SessionState int
 
@@ -26,6 +29,7 @@ const (
 )
 
 type Session struct {
+	mu sync.Mutex
 	state SessionState
 	uuid string
 }
