@@ -39,6 +39,7 @@ type Session struct {
 	owner *Participant
 	participants []*Participant
 	notifier chan struct{}
+	multiplexer *Multiplexer
 }
 
 func NewSession(participant *Participant) *Session {
@@ -65,6 +66,7 @@ func (s *Session) WaitOnStart(participant *Participant) {
 
 	if sessionClearanceAcquired(s.participants) {
 		s.state = SessionRunning
+		s.multiplexer = NewMultiplexer()
 		close(s.notifier)
 	} else {
 		_, open := <- s.notifier
@@ -73,6 +75,13 @@ func (s *Session) WaitOnStart(participant *Participant) {
 			panic("something is terribly wrong")
 		}
 	}
+}
+
+func (s *Session) Multiplexer() *Multiplexer {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.multiplexer
 }
 
 func sessionClearanceAcquired(participants []*Participant) bool {
