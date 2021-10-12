@@ -16,6 +16,8 @@ limitations under the License.
 
 package proxy
 
+import "github.com/pborman/uuid"
+
 type SessionState int
 
 const (
@@ -23,11 +25,13 @@ const (
 	SessionRunning SessionState = 2
 )
 
-type SessionData struct {
-
-}
-
 type Session struct {
 	state SessionState
-	data *SessionData
+	uuid string
+}
+func NewSession() *Session {
+	return &Session {
+		state: SessionPending,
+		uuid: uuid.New(),
+	}
 }
