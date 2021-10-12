@@ -29,6 +29,7 @@ type Session struct {
 	state SessionState
 	uuid string
 }
+
 func NewSession() *Session {
 	return &Session {
 		state: SessionPending,
