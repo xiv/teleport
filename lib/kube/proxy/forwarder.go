@@ -234,6 +234,7 @@ func NewForwarder(cfg ForwarderConfig) (*Forwarder, error) {
 		activeRequests:    make(map[string]context.Context),
 		ctx:               closeCtx,
 		close:             close,
+		sessions: make(map[string]Session),
 	}
 
 	fwd.router.POST("/api/:ver/namespaces/:podNamespace/pods/:podName/exec", fwd.withAuth(fwd.exec))
@@ -276,6 +277,8 @@ type Forwarder struct {
 	// creds contain kubernetes credentials for multiple clusters.
 	// map key is cluster name.
 	creds map[string]*kubeCreds
+	// sessions contains active sessions
+	sessions map[string]Session
 }
 
 // Close signals close to all outstanding or background operations
