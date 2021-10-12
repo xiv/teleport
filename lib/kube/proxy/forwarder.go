@@ -723,22 +723,26 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 		}
 	}()
 
+	participant := &Participant {
+		Context: ctx,
+	}
+
 	if strings.HasPrefix(p.ByName("podName"), "uuid") {
 		uuid := trimLeftChars(p.ByName("podName"), 4)
 		f.mu.Lock()
 		session := f.sessions[uuid]
 		f.mu.Unlock()
-		session.WaitOnStart(ctx)
+		session.WaitOnStart(participant)
 
 		// TODO(joel): attach multiplexer here
 	}
 
 
-	session := NewSession(ctx)
+	session := NewSession(participant)
 	f.mu.Lock()
 	f.sessions[session.uuid] = session
 	f.mu.Unlock()
-	session.WaitOnStart(ctx)
+	session.WaitOnStart(participant)
 
 	sess, err := f.newClusterSession(*ctx)
 	if err != nil {

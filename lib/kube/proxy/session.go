@@ -28,32 +28,36 @@ const (
 	SessionRunning SessionState = 2
 )
 
+type Participant struct {
+	Context *authContext
+}
+
 type Session struct {
 	mu sync.Mutex
 	state SessionState
 	uuid string
-	owner *authContext
-	participants []*authContext
+	owner *Participant
+	participants []*Participant
 	notifier chan struct{}
 }
 
-func NewSession(ctx *authContext) *Session {
-	participants := make([]*authContext, 0)
-	participants = append(participants, ctx)
+func NewSession(participant *Participant) *Session {
+	participants := make([]*Participant, 0)
+	participants = append(participants, participant)
 
 	return &Session {
 		state: SessionPending,
 		uuid: uuid.New(),
-		owner: ctx,
+		owner: participant,
 		participants: participants,
 		notifier: make(chan struct{}),
 	}
 }
 
-func (s *Session) WaitOnStart(ctx *authContext) {
+func (s *Session) WaitOnStart(participant *Participant) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.participants = append(s.participants, ctx)
+	s.participants = append(s.participants, participant)
 
 	if s.state == SessionRunning {
 		return
@@ -71,9 +75,9 @@ func (s *Session) WaitOnStart(ctx *authContext) {
 	}
 }
 
-func sessionClearanceAcquired(participants []*authContext) bool {
+func sessionClearanceAcquired(participants []*Participant) bool {
 	for _, participant := range participants {
-		roles := participant.User.GetRoles()
+		roles := participant.Context.User.GetRoles()
 
 		for _, role := range roles {
 			if role == "admin" {
