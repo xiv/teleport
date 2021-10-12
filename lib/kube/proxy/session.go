@@ -63,7 +63,11 @@ func (s *Session) WaitOnStart(ctx *authContext) {
 		s.state = SessionRunning
 		close(s.notifier)
 	} else {
-		_, _ = <- s.notifier
+		_, open := <- s.notifier
+
+		if open {
+			panic("something is terribly wrong")
+		}
 	}
 }
 
