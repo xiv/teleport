@@ -2063,7 +2063,6 @@ func (tc *TeleportClient) connectToProxy(ctx context.Context) (*ProxyClient, err
 		HostKeyCallback: hostKeyCallback,
 		Auth:            authMethods,
 	}
-	log.Infof("Connecting proxy=%v login=%q", sshProxyAddr, sshConfig.User)
 
 	sshClient, err := ssh.Dial("tcp", sshProxyAddr, sshConfig)
 	if err != nil {
@@ -2072,6 +2071,7 @@ func (tc *TeleportClient) connectToProxy(ctx context.Context) (*ProxyClient, err
 	}
 
 	log.Infof("Successful auth with proxy %v.", sshProxyAddr)
+	log.Debugf("ssh dial conn remote addr", sshClient.Conn.RemoteAddr())
 	return &ProxyClient{
 		teleportClient:  tc,
 		Client:          sshClient,
