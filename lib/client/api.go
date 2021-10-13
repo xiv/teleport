@@ -2102,6 +2102,10 @@ func (tc *TeleportClient) connectToProxy(ctx context.Context) (*ProxyClient, err
 		Auth:            authMethods,
 	}
 	log.Infof("Connecting proxy=%v login=%q", sshProxyAddr, sshConfig.User)
+	log.Debugf("config: %+v", tc.Config)
+	log.Debugf("hostkeycallback: %+v", hostKeyCallback)
+	log.Debugf("authMethods: %+v", authMethods)
+	log.Debugf("user: %+v", sshConfig.User)
 
 	sshClient, err := makeProxySSHClient(tc.Config, sshConfig)
 	if err != nil {
@@ -2140,12 +2144,14 @@ func makeProxySSHClientWithTLSWrapper(cfg Config, sshConfig *ssh.ClientConfig) (
 
 func makeProxySSHClient(cfg Config, sshConfig *ssh.ClientConfig) (*ssh.Client, error) {
 	if cfg.ALPNSNIListenerEnabled {
+		log.Debugf("using alpn")
 		return makeProxySSHClientWithTLSWrapper(cfg, sshConfig)
 	}
 	client, err := ssh.Dial("tcp", cfg.SSHProxyAddr, sshConfig)
 	if err != nil {
 		return nil, trace.Wrap(err, "failed to authenticate with proxy %v", cfg.SSHProxyAddr)
 	}
+	log.Debugf("remote conn dial: %v", client.Conn.RemoteAddr())
 	return client, nil
 }
 
