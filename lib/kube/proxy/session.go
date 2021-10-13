@@ -29,36 +29,46 @@ const (
 	SessionRunning SessionState = 2
 )
 
+// Participant stores all state for a session participant required for networking and permission checking.
 type Participant struct {
 	Context *authContext
 }
 
+// Session stores the state of an ongoing interactive session.
 type Session struct {
-	mu           sync.Mutex
-	state        SessionState
-	uuid         string
-	owner        *Participant
+	mu       sync.Mutex
+	uuid     string
+	owner    *Participant
+	notifier chan struct{}
+
+	// mutable, protected by lock
+	state SessionState
+
+	// mutable, protected by lock
 	participants []*Participant
-	notifier     chan struct{}
-	multiplexer  *Multiplexer
+
+	// mutable, protected by lock
+	multiplexer *Multiplexer
 }
 
-func NewSession(participant *Participant) *Session {
+// NewSession creates a new Session with a given owner.
+func NewSession(owner *Participant) *Session {
 	participants := make([]*Participant, 0)
-	participants = append(participants, participant)
+	participants = append(participants, owner)
 
 	return &Session{
 		state:        SessionPending,
 		uuid:         uuid.New(),
-		owner:        participant,
+		owner:        owner,
 		participants: participants,
 		notifier:     make(chan struct{}),
 	}
 }
 
+// WaitOnStart adds the given participant to the list of session participants
+// and waits for the session to transition to a running state.
 func (s *Session) WaitOnStart(participant *Participant) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.participants = append(s.participants, participant)
 
 	if s.state == SessionRunning {
@@ -69,7 +79,9 @@ func (s *Session) WaitOnStart(participant *Participant) {
 		s.state = SessionRunning
 		s.multiplexer = NewMultiplexer()
 		close(s.notifier)
+		s.mu.Unlock()
 	} else {
+		s.mu.Unlock()
 		_, open := <-s.notifier
 
 		if open {
@@ -78,6 +90,7 @@ func (s *Session) WaitOnStart(participant *Participant) {
 	}
 }
 
+// Fetch the multiplexer of a given session.
 func (s *Session) Multiplexer() *Multiplexer {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -85,6 +98,8 @@ func (s *Session) Multiplexer() *Multiplexer {
 	return s.multiplexer
 }
 
+// sessionClearanceAcquired determines if a set of participants
+// fulfills the criteria to transition a session to a running state.
 func sessionClearanceAcquired(participants []*Participant) bool {
 	for _, participant := range participants {
 		roles := participant.Context.User.GetRoles()
