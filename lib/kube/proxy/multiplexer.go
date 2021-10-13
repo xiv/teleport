@@ -68,9 +68,9 @@ func (m *Multiplexer) Run(stdin io.Writer, stdout io.Reader, stderr io.Reader) {
 		close(notifier)
 		notifier = make(chan struct{})
 
-		copyRemoteUntil(stdinR, stdin, notifier)
-		copyRemoteUntil(stdout, stdoutW, notifier)
-		copyRemoteUntil(stderr, stderrW, notifier)
+		go copyRemoteUntil(stdinR, stdin, notifier)
+		go copyRemoteUntil(stdout, stdoutW, notifier)
+		go copyRemoteUntil(stderr, stderrW, notifier)
 	}
 }
 
