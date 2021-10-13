@@ -234,7 +234,7 @@ func NewForwarder(cfg ForwarderConfig) (*Forwarder, error) {
 		activeRequests:    make(map[string]context.Context),
 		ctx:               closeCtx,
 		close:             close,
-		sessions: make(map[string]*Session),
+		sessions:          make(map[string]*Session),
 	}
 
 	fwd.router.POST("/api/:ver/namespaces/:podNamespace/pods/:podName/exec", fwd.withAuth(fwd.exec))
@@ -723,7 +723,7 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 		}
 	}()
 
-	participant := &Participant {
+	participant := &Participant{
 		Context: ctx,
 	}
 
@@ -736,7 +736,6 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 
 		// TODO(joel): attach multiplexer here
 	}
-
 
 	session := NewSession(participant)
 	f.mu.Lock()
@@ -791,7 +790,7 @@ func (f *Forwarder) exec(ctx *authContext, w http.ResponseWriter, req *http.Requ
 			Context:      f.ctx,
 			Streamer:     streamer,
 			Clock:        f.cfg.Clock,
-			SessionID: libsession.ID(session.uuid),
+			SessionID:    libsession.ID(session.uuid),
 			ServerID:     f.cfg.ServerID,
 			Namespace:    f.cfg.Namespace,
 			RecordOutput: ctx.recordingConfig.GetMode() != types.RecordOff,

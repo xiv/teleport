@@ -17,8 +17,9 @@ limitations under the License.
 package proxy
 
 import (
-	"github.com/pborman/uuid"
 	"sync"
+
+	"github.com/pborman/uuid"
 )
 
 type SessionState int
@@ -33,25 +34,25 @@ type Participant struct {
 }
 
 type Session struct {
-	mu sync.Mutex
-	state SessionState
-	uuid string
-	owner *Participant
+	mu           sync.Mutex
+	state        SessionState
+	uuid         string
+	owner        *Participant
 	participants []*Participant
-	notifier chan struct{}
-	multiplexer *Multiplexer
+	notifier     chan struct{}
+	multiplexer  *Multiplexer
 }
 
 func NewSession(participant *Participant) *Session {
 	participants := make([]*Participant, 0)
 	participants = append(participants, participant)
 
-	return &Session {
-		state: SessionPending,
-		uuid: uuid.New(),
-		owner: participant,
+	return &Session{
+		state:        SessionPending,
+		uuid:         uuid.New(),
+		owner:        participant,
 		participants: participants,
-		notifier: make(chan struct{}),
+		notifier:     make(chan struct{}),
 	}
 }
 
@@ -69,7 +70,7 @@ func (s *Session) WaitOnStart(participant *Participant) {
 		s.multiplexer = NewMultiplexer()
 		close(s.notifier)
 	} else {
-		_, open := <- s.notifier
+		_, open := <-s.notifier
 
 		if open {
 			panic("something is terribly wrong")

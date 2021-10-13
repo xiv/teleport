@@ -19,14 +19,16 @@ package proxy
 import (
 	"io"
 	"sync"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type Multiplexer struct {
-	mu sync.Mutex
+	mu              sync.Mutex
 	clientsModified chan struct{}
-	stdinR []io.Reader
-	stdoutW []io.Writer
-	stderrW []io.Writer
+	stdinR          []io.Reader
+	stdoutW         []io.Writer
+	stderrW         []io.Writer
 }
 
 func NewMultiplexer() *Multiplexer {
@@ -38,7 +40,7 @@ func NewMultiplexer() *Multiplexer {
 	}
 }
 
-func (m* Multiplexer) RegisterClient(stdin io.Reader, stdout io.Writer, stderr io.Writer) {
+func (m *Multiplexer) RegisterClient(stdin io.Reader, stdout io.Writer, stderr io.Writer) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -49,14 +51,14 @@ func (m* Multiplexer) RegisterClient(stdin io.Reader, stdout io.Writer, stderr i
 	m.clientsModified <- struct{}{}
 }
 
-func (m* Multiplexer) Run(stdin io.Writer, stdout io.Reader, stderr io.Reader) {
+func (m *Multiplexer) Run(stdin io.Writer, stdout io.Reader, stderr io.Reader) {
 	var stdinR io.Reader
 	var stdoutW io.Writer
 	var stderrW io.Writer
 	notifier := make(chan struct{})
 
 	for {
-		_, _ = <- m.clientsModified
+		<-m.clientsModified
 		m.mu.Lock()
 		stdinR = io.MultiReader(m.stdinR...)
 		stdoutW = io.MultiWriter(m.stdoutW...)
@@ -66,12 +68,27 @@ func (m* Multiplexer) Run(stdin io.Writer, stdout io.Reader, stderr io.Reader) {
 		close(notifier)
 		notifier = make(chan struct{})
 
-		copyUntil(stdinR, stdin, notifier)
-		copyUntil(stdout, stdoutW, notifier)
-		copyUntil(stderr, stderrW, notifier)
+		copyRemoteUntil(stdinR, stdin, notifier)
+		copyRemoteUntil(stdout, stdoutW, notifier)
+		copyRemoteUntil(stderr, stderrW, notifier)
 	}
 }
 
-func copyUntil(src io.Reader, dst io.Writer, notifier chan struct{}) {
+type readerFunc func(p []byte) (n int, err error)
 
+func (rf readerFunc) Read(p []byte) (n int, err error) { return rf(p) }
+
+func copyRemoteUntil(src io.Reader, dst io.Writer, notifier chan struct{}) {
+	_, err := io.Copy(dst, readerFunc(func(p []byte) (int, error) {
+		select {
+		case <-notifier:
+			return 0, nil
+		default:
+			return src.Read(p)
+		}
+	}))
+
+	if err != nil {
+		log.Warn("failed to multiplex session stream: %v", err)
+	}
 }
