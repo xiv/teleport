@@ -563,7 +563,7 @@ lint-helm:
 		fi; \
 	done
 
-ADDLICENSE := $(GOPATH)/bin/addlicense
+ADDLICENSE := $(shell go env GOPATH)/bin/addlicense
 ADDLICENSE_ARGS := -c 'Gravitational, Inc' -l apache \
 		-ignore '**/*.c' \
 		-ignore '**/*.h' \

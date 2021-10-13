@@ -11,8 +11,6 @@ linters:
   enable:
     - bodyclose
     - deadcode
-    - goimports
-    - golint
     - gosimple
     - govet
     - ineffassign
