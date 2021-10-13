@@ -23,6 +23,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// Multiplexer maps multiple clients onto one server with information split up into stdin, stdout and stderr streams.
 type Multiplexer struct {
 	mu              sync.Mutex
 	clientsModified chan struct{}
@@ -31,6 +32,7 @@ type Multiplexer struct {
 	stderrW         []io.Writer
 }
 
+// NewMultiplexer creates a new Multiplexer.
 func NewMultiplexer() *Multiplexer {
 	clientsModified := make(chan struct{})
 	clientsModified <- struct{}{}
@@ -40,6 +42,7 @@ func NewMultiplexer() *Multiplexer {
 	}
 }
 
+// RegisterClient takes a set of client streams and starts multiplexing information to them.
 func (m *Multiplexer) RegisterClient(stdin io.Reader, stdout io.Writer, stderr io.Writer) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -51,6 +54,7 @@ func (m *Multiplexer) RegisterClient(stdin io.Reader, stdout io.Writer, stderr i
 	m.clientsModified <- struct{}{}
 }
 
+// Run takes a set of server streams and starts multiplexing them to the clients.
 func (m *Multiplexer) Run(stdin io.Writer, stdout io.Reader, stderr io.Reader) {
 	var stdinR io.Reader
 	var stdoutW io.Writer
@@ -68,17 +72,20 @@ func (m *Multiplexer) Run(stdin io.Writer, stdout io.Reader, stderr io.Reader) {
 		close(notifier)
 		notifier = make(chan struct{})
 
-		go copyRemoteUntil(stdinR, stdin, notifier)
-		go copyRemoteUntil(stdout, stdoutW, notifier)
-		go copyRemoteUntil(stderr, stderrW, notifier)
+		go copyUntil(stdinR, stdin, notifier)
+		go copyUntil(stdout, stdoutW, notifier)
+		go copyUntil(stderr, stderrW, notifier)
 	}
 }
 
+// Name the function signature for ease of use.
 type readerFunc func(p []byte) (n int, err error)
 
+// Although somewhat cryptic, this snipped implements io.Reader for any closure with the correct signature.
 func (rf readerFunc) Read(p []byte) (n int, err error) { return rf(p) }
 
-func copyRemoteUntil(src io.Reader, dst io.Writer, notifier chan struct{}) {
+// copyUntil copies data from src to dst until the notifier channel is closed.
+func copyUntil(src io.Reader, dst io.Writer, notifier chan struct{}) {
 	_, err := io.Copy(dst, readerFunc(func(p []byte) (int, error) {
 		select {
 		case <-notifier:
